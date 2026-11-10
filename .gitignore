@@ -1,0 +1,35 @@
+# Build directories and outputs
+build/
+build-test/
+dist/
+cache/
+*.apk
+*.dex
+*.class
+
+# Archives and binaries
+*.tar
+*.tar.gz
+*.tar.xz
+*.bin
+*.idsig
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary and log files
+*.log
+*.tmp
+temp/
+
+# IDE and OS
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Teamwork agent metadata
+.agents/
