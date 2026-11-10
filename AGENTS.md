@@ -1,9 +1,28 @@
-# Agy-cli-app Product Constitution
+# Agy-cli-app Product Contract and Agent Workflow
 
 > This is the permanent contract for the project. Every AI or human contributor
-> must read it before making a plan or changing code. `PLAN.md` records the
-> current route and progress; this file defines the destination and the rules
-> that must not be traded away for an easier implementation.
+> must read it before making a plan or changing code. This contract applies to
+> one AI, several independent AIs, delegated agents, and human contributors.
+> `PLAN.md` contains stable bug IDs, assignable task IDs, dependencies, ownership,
+> acceptance checks, and evidence. Neither document is an automatic scheduler.
+
+## Start here — every session
+
+1. Read this file and the current `PLAN.md`, then inspect the current code and
+   `git status`. Do not trust an old chat, branch, line number, or DONE claim.
+2. Identify your role: **single agent**, **coordinator**, **worker**, or
+   **reviewer**. A single agent performs the coordinator/worker/reviewer duties
+   sequentially; it does not need to launch other agents.
+3. Resolve the requested bug ID (`R...`) to its owning task (`A...`–`G...`).
+   Check the task's prerequisites, assignment, write scope, and acceptance checks.
+4. Work only on the assigned task or named subtask. If blocked, explain the
+   exact missing prerequisite and a safe next option; do not guess it away.
+5. Test, report, and update progress using section 6. The owner should not have
+   to remind an AI to maintain the plan after every task.
+
+**“Fix all” means process all currently executable tasks safely, in dependency
+order, with checkpoints. It does not mean ignore dependencies, invent artifacts,
+silently take owner decisions, or rewrite the app in one giant patch.**
 
 ## 1. Authority and sources of truth
 
@@ -253,25 +272,103 @@ report a system-shell fallback as a complete native environment.
 
 ## 6. Engineering and evidence rules
 
+### 6.1 Assignment and dependency rules
+
 - Read current files before editing; line numbers and plans become stale.
-- Implement one `PLAN.md` task or explicitly named subtask at a time. Respect its
-  dependencies and stop honestly at owner/artifact/protocol gates.
+- Bug IDs identify problems; task IDs identify bounded work. Never renumber or
+  delete an ID because work is complete. One bug can require several tasks.
+- For a specific-ID request, fix that scope, not unrelated bugs. Split a large
+  task into stable child IDs in `PLAN.md` before implementation. A parent is not
+  DONE merely because one child is DONE.
+- Distinguish **implementation prerequisites**, **integration/acceptance gates**,
+  **file conflicts**, and **priority suggestions**. A security mitigation may be
+  independently executable even when the final feature needs an artifact.
+- Do not add a dependency just because two tasks appear next to each other or
+  touch the same file. Explain the actual interface, state, artifact, or test
+  needed. File conflicts require scheduling or isolation, not fake architecture.
+- A claim is an assignment, not an atomic lock. Two independent AIs cannot
+  coordinate safely merely by both reading TODO from an old copy of the plan.
+
+### 6.2 Single-agent operation
+
+The agent checks readiness, records its assignment, reproduces the problem,
+implements a bounded patch, tests it, and updates `PLAN.md` itself. If acceptance
+is incomplete, use REVIEW or BLOCKED with the missing evidence, not DONE.
+When asked to continue or fix all, choose the next executable task after this
+checkpoint. Stop honestly when only gates remain.
+
+### 6.3 Parallel or independent-agent operation
+
+**Safe default: one coordinator, separate working copies, one task per worker.**
+
+- The coordinator owns the canonical `PLAN.md`, allocation, shared interfaces,
+  integration, and final status. It may also implement one non-conflicting task.
+- Each worker gets a unique label, task ID, exact base revision, current copies
+  of both documents, write scope, dedicated tests, and acceptance checks. Workers
+  from different providers or machines follow the same rule.
+- Prefer separate Git worktrees, branches, or isolated clones. Creating branches
+  or worktrees does not authorize committing, pushing, or publishing. New copies
+  do not inherit uncommitted changes: transfer the approved instruction snapshot
+  explicitly or ask the owner for permission to commit it first.
+- Never run several uncontrolled editors in the same working tree. If isolation
+  is unavailable, serialize edits and builds; parallelize read-only review instead.
+  Disjoint production files alone are insufficient: tests, generated outputs,
+  native assets, and both Markdown files can also conflict.
+- Workers must not edit the coordinator's working tree or canonical plan. They
+  return a reviewable patch and completion receipt in the conversation. Any
+  worker-local plan proposal is merged semantically by the coordinator, never
+  copied over the canonical plan wholesale.
+- Shared files/interfaces need one writer. A worker needing a wider scope pauses
+  and asks the coordinator to reassign or serialize that change. Do not overwrite
+  another worker's fix, fixtures, or evidence to resolve a conflict.
+- The coordinator integrates one patch at a time, reruns relevant tests against
+  the combined code, updates statuses/evidence, and then issues fresh assignments.
+  Isolated success is not proof that the combined app works.
+- A REVIEW/DONE dependency is not available to another isolated worker until the
+  accepted patch and instruction snapshot are actually present in that worker's
+  base. Stale assignments must be revalidated before editing.
+- A separate reviewer is recommended for consent, authentication, archive/install,
+  process ownership, and signing changes. Review does not replace device tests.
+- Do not launch paid/delegated agents unless the owner or applicable instructions
+  authorize delegation. A coordination plan is not permission to spend money.
+
+### 6.4 Implementation and acceptance
+
 - Prefer a reviewable patch of roughly 3–5 production files. Split broad tasks.
-- Preserve the existing Java/manual APK pipeline unless an approved task changes
-  it. Do not migrate frameworks merely to make a task easier.
+- Preserve the Java/manual APK pipeline unless an approved task changes it.
+  Do not migrate frameworks merely to make a task easier.
 - Put pure policy/parser/state behavior in offline host tests. Put Android API,
   PTY, WebView, lifecycle, and package-prefix behavior in device tests.
 - Use fixtures, fake CLI processes, and local servers before live Google services.
-- Every bug fix needs a regression test that fails before and passes after.
-- “Done” requires the task's acceptance evidence. A compile pass, grep, mock,
-  screenshot, or untested assertion is insufficient.
+- Every bug fix needs a regression test that fails before and passes after. If a
+  device is unavailable, record the missing device check and leave its acceptance
+  pending; do not use a source grep as a substitute for runtime evidence.
+- “Done” requires named acceptance evidence on the actual integrated revision.
+  A compile pass, mock, screenshot, or untested assertion is insufficient.
 - Never weaken, delete, skip, or rewrite a failing test merely to obtain green.
-- Do not overwrite unfamiliar changes, user data, credentials, workspaces, or
-  package state. Do not perform destructive git operations, publish, sign a
-  release, run paid/live agent prompts, or commit automatically without explicit
-  owner authorization.
-- End each implementation with changed paths, commands actually run and results,
-  device tests performed or not performed, blockers, and the next task ID.
+  Existing known failures must be attributed by ID, and no new failure hidden.
+  A test expecting safe rejection may legitimately pass when rejection is the
+  documented contract; it must never bless corrupt or unsafe success.
+- Preserve unfamiliar changes, user data, credentials, workspaces, and package
+  state. Do not run destructive Git operations, publish, sign a release, invoke
+  paid/live agent prompts, or commit automatically without explicit authorization.
+- New findings need source evidence and a trigger/consequence, plus a bounded
+  owning task. Label source-confirmed, fixture-reproduced, device-reproduced, and
+  unverified hypotheses separately; do not manufacture bug counts.
+
+### 6.5 Progress and owner-facing handoff
+
+- The single agent or coordinator updates `PLAN.md` after assignment, blockage,
+  integration, verification, completion, or reopening. Workers supply receipts.
+- Keep fixed findings with their regression tests and closure evidence. If a bug
+  returns, reopen the same ID; if genuinely new, allocate a new ID.
+- A completion receipt names task/subtask, base/result revision or patch identity,
+  changed paths, behavior, regression tests, actual commands/results, device tests
+  performed or NOT performed, user-data/signing/account/network effects, review
+  and integration state, remaining gates, and recommended next task.
+- End in plain language with **what works now, what is still unverified, and the
+  exact next prompt the owner can use**. The owner need not understand Git or
+  dependencies to assign the next task.
 
 The owner is ambitious but does not need to be a coding expert. Explain outcomes
 in plain language, recommend a safe default, distinguish an owner decision from
@@ -282,7 +379,8 @@ an engineering detail, and never hide uncertainty behind confident jargon.
 The repository intentionally has exactly two Markdown documents:
 
 - `AGENTS.md` — enduring goal, constraints, architecture, and contributor rules.
-- `PLAN.md` — current findings, decisions, ordered work, status, and evidence.
+- `PLAN.md` — owner quick start, findings, assignable work, dependency reasons,
+  current assignments, decisions, status, and acceptance evidence.
 
 Do not add README, release-note, module, test, handoff, or nested AGENTS Markdown
 files. Put stable local interface detail in code, schemas, tests, or `--help`
