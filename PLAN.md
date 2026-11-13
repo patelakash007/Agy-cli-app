@@ -1,12 +1,12 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `0606eb7` on `main` (B06 installer slice),
-  plus an uncommitted F02/G01 share + permission + truthfulness pass in this
-  chat's worktree. Before `41cdd05`/`0606eb7` were `4168c62` (review/hardening
-  pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was
-  `d728f94` (`Initial version`). Always inspect current `HEAD`, working-tree
-  changes, and the latest instruction snapshot before work.
+- **Current integrated revision:** `9719035` on `main` (F02/G01 share,
+  permission and truthfulness pass plus local A03/A08 native evidence). Before
+  it were `0606eb7`/`41cdd05` (B06 installer slice), `4168c62` (review/hardening
+  pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was `d728f94`
+  (`Initial version`). Always inspect current `HEAD`, working-tree changes, and
+  the latest instruction snapshot before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -112,7 +112,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `0606eb7` + AGENTS/PLAN snapshot; uncommitted worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `9719035` + AGENTS/PLAN snapshot; clean worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
@@ -318,9 +318,10 @@ entry. Do not convert unverified suspicions into findings.
 
 ### 3.2 Status after the 2026-11-13 single-agent pass
 
-All changes below are uncommitted work on this chat's worktree. “FIXED” means
-the named offline regression passes; “PARTIAL” means the code is present but a
-required device/integration check is still missing.
+Statuses below describe work committed through the revisions named in section 9
+(latest `9719035`) unless a row states otherwise. “FIXED” means the named offline
+regression passes; “PARTIAL” means the code is present but a required
+device/integration check is still missing.
 
 | ID | Status | Evidence / remaining gate |
 |---|---|---|
@@ -1385,8 +1386,8 @@ the exact missing check, not DONE and not “nothing accomplished.”
 | Review/hardening pass / 2026-11-13 (`0f9250b`) | Exact-host HTTPS auth policy; per-flavor `/proc` cleanup scope; URL watcher no longer retains the Process or writes stdin; non-browser WebView schemes blocked; cleartext disabled outside loopback; write failures surfaced; archive comments preserved; NDK fail-closed helper staging with ELF/16 KB checks; tracked stale helper removed; CI builds only the development edition and publication stays refused. Added `ProcessScope`, `test_stage_assets.py`, align/package/host cases. Checks: host suite PASS 38 Python + 30 Java; build smoke PASS both flavors; `bash -n` clean; workflow YAML parses. | DONE (offline): A03 staging policy, A06, B03/B05/B07 hardening. PARTIAL: R01/R05/R17/R23 pending device/NDK/CI evidence. No device run, real NDK compile, signing, network, vendor login, or publication. |
 | B06 preparation slice / 2026-11-13 (`41cdd05`, pushed to `main`) | Replaced `CliDownloader` with `CliInstallPolicy` + `CliInstallMetadata` + `CliInstaller`: explicit Install/Update only, ABI gate before network, exact manifest URL, approved artifact host, redirects refused, bounded manifest/download, streaming SHA-512, free-space preflight, unique staging, AArch64+linker ELF check, atomic publish, strict install record, one job, cancellation. `triggerDownload` refuses while a published session, stdin owner, or onboarding is live; the dashboard shows the installed version. Checks: `bash tests/run_host_tests.sh` → 38 Python + 37 Java PASS, exit 0; `01_gen_config.py` + `03_compile_java.sh` → 78 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, 100 classes, exit 0 (compile-only assets, no native/runtime proof). | REVIEW: live stop/restart integration is C02; no device install/upgrade, real vendor download, or interrupted/low-space device run. ELF check is metadata, not spawn/Bionic proof. No APK install, signing, or publication. |
 
-| A03/A08 native evidence / 2026-11-13 (`0606eb7` base, uncommitted) | Built the PTY helper with NDK `27.0.12077973`; staging verified ELF64/AArch64/linker64/16 KB; full pipeline compiled 88 classes, D8 produced one DEX, and non-compile-only packaging produced a 359,681-byte APK containing 1 DEX and the 3 required runtime assets. | PARTIAL: A03 still needs CI provenance and device execution; A08 stays DONE offline with its native gate now locally exercised. No signing, install or publication. |
-| F02/G01 safety + truthfulness pass / 2026-11-13 (`0606eb7` base, uncommitted) | Share: `SharePathPolicy` + read-only `AppFileProvider` limited to `filesDir/share`, relative ids, no write modes, traversal/dot/empty/control/symlink rejection; deleted unused raw-path `DocumentsContractHelper` and `UriDispatcher`. Permissions: removed all-files, legacy shared-storage, notification and battery-exemption permissions, `requestLegacyExternalStorage` and the launch prompt. Claims: honest UI subtitle/status, suppressed heuristic email, removed dead auth-success callbacks, rewrote the release body, development-only workflow/job names, removed the dead vendor-input download. Checks: `bash tests/run_host_tests.sh` → 41 Python + 38 Java PASS, exit 0; `03_compile_java.sh` → 77 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, exit 0; workflow YAML parses; `git diff --check` clean. | PARTIAL: R34/F02 offline mitigation only (file browser/editor and device grant tests pending); R35 fixed offline; G01 first pass only. No device run, signing, download or publication. |
+| A03/A08 native evidence / 2026-11-13 (`9719035`, pushed to `main`) | Built the PTY helper with NDK `27.0.12077973`; staging verified ELF64/AArch64/linker64/16 KB; full pipeline compiled 88 classes, D8 produced one DEX, and non-compile-only packaging produced a 359,681-byte APK containing 1 DEX and the 3 required runtime assets. | PARTIAL: A03 still needs CI provenance and device execution; A08 stays DONE offline with its native gate now locally exercised. No signing, install or publication. |
+| F02/G01 safety + truthfulness pass / 2026-11-13 (`9719035`, pushed to `main`) | Share: `SharePathPolicy` + read-only `AppFileProvider` limited to `filesDir/share`, relative ids, no write modes, traversal/dot/empty/control/symlink rejection; deleted unused raw-path `DocumentsContractHelper` and `UriDispatcher`. Permissions: removed all-files, legacy shared-storage, notification and battery-exemption permissions, `requestLegacyExternalStorage` and the launch prompt. Claims: honest UI subtitle/status, suppressed heuristic email, removed dead auth-success callbacks, rewrote the release body, development-only workflow/job names, removed the dead vendor-input download. Checks: `bash tests/run_host_tests.sh` → 41 Python + 38 Java PASS, exit 0; `03_compile_java.sh` → 77 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, exit 0; workflow YAML parses; `git diff --check` clean. | PARTIAL: R34/F02 offline mitigation only (file browser/editor and device grant tests pending); R35 fixed offline; G01 first pass only. No device run, signing, download or publication. |
 
 The 2026-11-13 passes left the suite green: `bash tests/run_host_tests.sh` → 41
 Python + 38 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
