@@ -51,6 +51,11 @@ class RunnerGuardTests(unittest.TestCase):
         self.assertIn("cannot be combined", result.stderr)
         self.assertNotIn("PASS", result.stdout)
 
+    def test_reverse_flag_order_also_fails(self):
+        result = self.run_runner(RUNNER, ["--java-only", "--python-only"])
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn("PASS", result.stdout)
+
     def test_unknown_argument_fails(self):
         result = self.run_runner(RUNNER, ["--bogus"])
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
