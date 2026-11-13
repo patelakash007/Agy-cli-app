@@ -5,6 +5,8 @@ import com.agy.install.TarHeader;
 import com.agy.install.TarPath;
 import com.agy.install.TarPolicy;
 import com.agy.log.LogRedactor;
+import com.agy.runtime.CliInstallMetadata;
+import com.agy.runtime.CliInstallPolicy;
 import com.agy.util.AtomicFileWriter;
 import com.agy.util.ErrorText;
 import com.agy.util.ShellQuote;
@@ -29,6 +31,11 @@ public final class HostTestRunner {
     private interface TestCase {
         void run() throws Exception;
     }
+
+    private static final String ARTIFACT_URL = "https://storage.googleapis.com/antigravity-public/"
+            + "antigravity-cli/1.5.3-6604829099950080/android-arm/cli_android_arm64.tar.gz";
+    private static final String SHA512 = "be0bcc8b73c0afa42f9e7ab681846b968627a8b6d3a1294d"
+            + "490c43146165f22f64feaf39a832811339918e18ec763739952dc796a55946cccd79aaaec759d0e5";
 
     private static int passed;
     private static int failed;
@@ -241,6 +248,154 @@ public final class HostTestRunner {
             }
         });
 
+        // B06/R33: one transactional CLI installer. Manifest/artifact origins,
+        // digest/version syntax, ABI gate, free-space preflight, ELF identity and
+        // the persisted install record are pure policy and testable offline.
+        test("CLI manifest URL is exact", "B06", () -> {
+            assertTrue(CliInstallPolicy.isValidManifestUrl(CliInstallPolicy.MANIFEST_URL),
+                    "official manifest URL was rejected");
+            assertFalse(CliInstallPolicy.isValidManifestUrl(CliInstallPolicy.MANIFEST_URL + "?x=1"),
+                    "manifest URL with a query was accepted");
+            assertFalse(CliInstallPolicy.isValidManifestUrl(
+                            "http://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
+                                    + "/manifests/android_arm64.json"),
+                    "HTTP manifest URL was accepted");
+            assertFalse(CliInstallPolicy.isValidManifestUrl(
+                            "https://attacker.example/manifests/android_arm64.json"),
+                    "foreign manifest URL was accepted");
+            assertFalse(CliInstallPolicy.isValidManifestUrl(null), "null manifest URL was accepted");
+        });
+        test("CLI artifact URL restricted to the vendor HTTPS origin", "B06", () -> {
+            assertTrue(CliInstallPolicy.isValidArtifactUrl(ARTIFACT_URL),
+                    "official artifact URL was rejected");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            ARTIFACT_URL.replace("https://", "http://")),
+                    "HTTP artifact URL was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            ARTIFACT_URL.replace("storage.googleapis.com",
+                                    "storage.googleapis.com.attacker.example")),
+                    "lookalike artifact host was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            "https://user:pass@storage.googleapis.com/antigravity-public/"
+                                    + "antigravity-cli/cli_android_arm64.tar.gz"),
+                    "artifact URL with credentials was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            ARTIFACT_URL.replace("storage.googleapis.com",
+                                    "storage.googleapis.com:8443")),
+                    "artifact URL with a non-default port was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(ARTIFACT_URL + "?token=1"),
+                    "artifact URL with a query was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            "https://storage.googleapis.com/antigravity-public/antigravity-cli/"
+                                    + "../etc/passwd.tar.gz"),
+                    "artifact path traversal was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            "https://storage.googleapis.com/antigravity-public/antigravity-cli/"
+                                    + "a%2Fb.tar.gz"),
+                    "encoded artifact path separator was accepted");
+            assertFalse(CliInstallPolicy.isValidArtifactUrl(
+                            "https://storage.googleapis.com/other/cli_android_arm64.tar.gz"),
+                    "artifact outside the vendor path was accepted");
+        });
+        test("CLI digest and version syntax is strict", "B06", () -> {
+            assertEquals(SHA512, CliInstallPolicy.normalizeSha512(SHA512.toUpperCase()),
+                    "digest was not normalized");
+            assertTrue(CliInstallPolicy.normalizeSha512(SHA512.substring(1)) == null,
+                    "short digest was accepted");
+            assertTrue(CliInstallPolicy.normalizeSha512(SHA512.substring(0, 127) + "g") == null,
+                    "non-hex digest was accepted");
+            assertTrue(CliInstallPolicy.normalizeSha512(" ") == null, "blank digest was accepted");
+            assertTrue(CliInstallPolicy.isValidVersion("1.5.3"), "valid version was rejected");
+            assertFalse(CliInstallPolicy.isValidVersion("1.5.3\nrm -rf"),
+                    "version with a control character was accepted");
+            assertFalse(CliInstallPolicy.isValidVersion("../1.5.3"),
+                    "version with a path was accepted");
+            assertFalse(CliInstallPolicy.isValidVersion(""), "empty version was accepted");
+        });
+        test("CLI install requires arm64-v8a", "B06", () -> {
+            assertTrue(CliInstallPolicy.isArm64Device(
+                            new String[]{"arm64-v8a", "armeabi-v7a"}),
+                    "arm64 device was rejected");
+            assertFalse(CliInstallPolicy.isArm64Device(new String[]{"x86_64"}),
+                    "x86_64 device was accepted");
+            assertFalse(CliInstallPolicy.isArm64Device(new String[0]),
+                    "empty ABI list was accepted");
+            assertFalse(CliInstallPolicy.isArm64Device(null), "null ABI list was accepted");
+        });
+        test("CLI free-space preflight is conservative", "B06", () -> {
+            long archive = 40L * 1024 * 1024;
+            assertTrue(CliInstallPolicy.requiredFreeBytes(archive) > archive * 2,
+                    "free-space reserve is not conservative");
+            assertTrue(CliInstallPolicy.hasFreeSpace(
+                            CliInstallPolicy.requiredFreeBytes(archive), archive),
+                    "exact free-space requirement was rejected");
+            assertFalse(CliInstallPolicy.hasFreeSpace(
+                            CliInstallPolicy.requiredFreeBytes(archive) - 1, archive),
+                    "insufficient free space was accepted");
+            assertEquals(-1L, CliInstallPolicy.requiredFreeBytes(0),
+                    "zero-size archive was planned");
+            assertEquals(-1L,
+                    CliInstallPolicy.requiredFreeBytes(CliInstallPolicy.MAX_ARCHIVE_BYTES + 1),
+                    "oversized archive was planned");
+        });
+        test("aarch64 Android ELF accepted and wrong targets rejected", "B06", () -> {
+            File dir = Files.createTempDirectory("agy-elf-").toFile();
+            try {
+                File ok = new File(dir, "ok");
+                writeElfFixture(ok, 2, 0xB7, true);
+                assertTrue(CliInstallPolicy.elfProblem(ok) == null,
+                        "valid ELF was rejected: " + CliInstallPolicy.elfProblem(ok));
+
+                File noLinker = new File(dir, "no-linker");
+                writeElfFixture(noLinker, 2, 0xB7, false);
+                assertFalse(CliInstallPolicy.elfProblem(noLinker) == null,
+                        "ELF without the Android linker was accepted");
+
+                File x86 = new File(dir, "x86");
+                writeElfFixture(x86, 2, 0x3E, true);
+                assertFalse(CliInstallPolicy.elfProblem(x86) == null,
+                        "x86_64 ELF was accepted");
+
+                File elf32 = new File(dir, "elf32");
+                writeElfFixture(elf32, 1, 0xB7, true);
+                assertFalse(CliInstallPolicy.elfProblem(elf32) == null,
+                        "ELF32 was accepted");
+
+                File text = new File(dir, "text");
+                Files.write(text.toPath(), "not an elf\n".getBytes(StandardCharsets.US_ASCII));
+                assertFalse(CliInstallPolicy.elfProblem(text) == null,
+                        "plain text was accepted as an ELF");
+            } finally {
+                deleteAtomicTree(dir);
+            }
+        });
+        test("CLI install record round-trips and rejects corruption", "B06", () -> {
+            CliInstallMetadata metadata = new CliInstallMetadata(
+                    CliInstallMetadata.SCHEMA, "1.5.3", SHA512, ARTIFACT_URL,
+                    repeatedHex('a', 64), 1763000000L);
+            String text = metadata.serialize();
+            CliInstallMetadata parsed = CliInstallMetadata.parse(text);
+            assertTrue(parsed != null, "install record did not parse");
+            assertEquals("1.5.3", parsed.version, "version");
+            assertEquals(SHA512, parsed.artifactSha512, "artifact digest");
+            assertEquals(ARTIFACT_URL, parsed.sourceUrl, "source URL");
+            assertEquals(1763000000L, parsed.installedAtEpochSeconds, "installed_at");
+            assertTrue(CliInstallMetadata.parse(text.replace("schema=1", "schema=2")) == null,
+                    "unknown schema was accepted");
+            assertTrue(CliInstallMetadata.parse(text.replace("version=1.5.3\n", "")) == null,
+                    "missing version was accepted");
+            assertTrue(CliInstallMetadata.parse(text + "extra=1\n") == null,
+                    "unknown key was accepted");
+            assertTrue(CliInstallMetadata.parse(text.replace("sha512=", "sha512=zz")) == null,
+                    "invalid artifact digest was accepted");
+            assertTrue(CliInstallMetadata.parse(text.replace("source=" + ARTIFACT_URL,
+                            "source=https://attacker.example/x.tar.gz")) == null,
+                    "foreign source URL was accepted");
+            assertTrue(CliInstallMetadata.parse(text + repeatedHex('x',
+                            CliInstallMetadata.MAX_BYTES)) == null,
+                    "oversized install record was accepted");
+        });
+
         System.out.println();
         System.out.printf("Java host tests: %d passed, %d failed%n", passed, failed);
         if (failed > 0) {
@@ -337,6 +492,35 @@ public final class HostTestRunner {
             }
             return new String(buffer, 0, offset, StandardCharsets.UTF_8);
         }
+    }
+
+    /** Builds a bounded ELF fixture with a valid header and optional linker path. */
+    private static void writeElfFixture(File file, int elfClass, int machine, boolean linker)
+            throws Exception {
+        byte[] data = new byte[1024];
+        data[0] = 0x7F;
+        data[1] = 'E';
+        data[2] = 'L';
+        data[3] = 'F';
+        data[4] = (byte) elfClass;
+        data[5] = 1;
+        data[6] = 1;
+        data[16] = 3;
+        data[18] = (byte) (machine & 0xFF);
+        data[19] = (byte) ((machine >> 8) & 0xFF);
+        if (linker) {
+            byte[] needle = "/system/bin/linker64".getBytes(StandardCharsets.US_ASCII);
+            System.arraycopy(needle, 0, data, 200, needle.length);
+        }
+        Files.write(file.toPath(), data);
+    }
+
+    private static String repeatedHex(char value, int count) {
+        StringBuilder sb = new StringBuilder(count);
+        for (int i = 0; i < count; i++) {
+            sb.append(value);
+        }
+        return sb.toString();
     }
 
     private static void deleteAtomicTree(File file) {

@@ -43,7 +43,8 @@ import android.widget.Toast;
 import com.agy.core.CoreRuntimeState;
 import com.agy.core.CoreServiceLauncher;
 import com.agy.oauth.OAuthManager;
-import com.agy.runtime.CliDownloader;
+import com.agy.runtime.CliInstallMetadata;
+import com.agy.runtime.CliInstaller;
 import com.agy.runtime.RuntimeManager;
 import com.agy.util.SensitiveDataRedactor;
 
@@ -134,7 +135,7 @@ public class MainActivity extends Activity {
             });
         }
 
-        if (CliDownloader.isInstalled(this)) {
+        if (CliInstaller.isInstalled(this)) {
             startCoreService();
         } else {
             promptDownload();
@@ -693,9 +694,9 @@ public class MainActivity extends Activity {
     }
 
     private void openEmbeddedStudio() {
-        if (!CliDownloader.isInstalled(this)) {
+        if (!CliInstaller.isInstalled(this)) {
             Toast.makeText(this, "Please install the Antigravity CLI first.", Toast.LENGTH_SHORT).show();
-            triggerDownload();
+            promptDownload();
             return;
         }
         if (!serviceRunning) {
@@ -732,7 +733,8 @@ public class MainActivity extends Activity {
     }
 
     private void updateDashboard() {
-        boolean installed = CliDownloader.isInstalled(this);
+        boolean installed = CliInstaller.isInstalled(this);
+        downloadButton.setText(installed ? "UPDATE CLI" : "INSTALL CLI");
         String lastError = CoreRuntimeState.lastError;
         String sessionUrl = CoreRuntimeState.serverUrl;
         boolean authPending = CoreRuntimeState.authPending;
@@ -838,7 +840,9 @@ public class MainActivity extends Activity {
             }
         } else {
             setBadge("STOPPED", Color.parseColor("#757575"));
-            infoText.setText("CLI process is idle");
+            CliInstallMetadata metadata = CliInstaller.readMetadata(this);
+            infoText.setText("Antigravity CLI"
+                    + (metadata != null ? " v" + metadata.version : "") + " is idle");
             sessionUrlText.setText("Session: None");
             openRemoteButton.setEnabled(true);
             openRemoteButton.setAlpha(1.0f);
@@ -877,7 +881,7 @@ public class MainActivity extends Activity {
     }
 
     private void startCoreService() {
-        if (!CliDownloader.isInstalled(this)) {
+        if (!CliInstaller.isInstalled(this)) {
             promptDownload();
             return;
         }
@@ -892,17 +896,41 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Shows the explicit Install action; it never downloads on its own (B06). */
     private void promptDownload() {
         downloadButton.setVisibility(View.VISIBLE);
-        triggerDownload();
+        downloadButton.setEnabled(true);
+        downloadButton.setText("INSTALL CLI");
+        downloadStatusText.setVisibility(View.VISIBLE);
+        downloadStatusText.setText(CliInstaller.isBusy()
+                ? "An Antigravity CLI installation is already running."
+                : "Antigravity CLI is not installed. Tap INSTALL CLI to download, "
+                        + "verify and install it.");
+        downloadProgress.setVisibility(View.GONE);
     }
 
     private void triggerDownload() {
+        if (CliInstaller.isBusy()) {
+            Toast.makeText(this, "An installation is already running.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // A supervised CLI owns the installed binary. Replacing it while it is
+        // running needs the C02 stop/restart contract, so refuse for now rather
+        // than tearing a live install.
+        if (CoreRuntimeState.serverUrl != null || CoreRuntimeState.stdinWriter != null
+                || CoreRuntimeState.onboardingPending) {
+            downloadStatusText.setVisibility(View.VISIBLE);
+            downloadStatusText.setText("Stop the running CLI before installing or updating it.");
+            downloadProgress.setVisibility(View.GONE);
+            Toast.makeText(this, "Stop the CLI before updating it.", Toast.LENGTH_LONG).show();
+            return;
+        }
         downloadStatusText.setVisibility(View.VISIBLE);
         downloadProgress.setVisibility(View.VISIBLE);
         downloadProgress.setProgress(0);
+        downloadButton.setEnabled(false);
 
-        CliDownloader.downloadAndInstall(this, new CliDownloader.DownloadListener() {
+        CliInstaller.install(this, new CliInstaller.Listener() {
             @Override
             public void onProgress(final int percent, final String message) {
                 handler.post(() -> {
@@ -912,21 +940,25 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public void onSuccess(final File binary) {
+            public void onSuccess(final File binary, final CliInstallMetadata metadata) {
                 handler.post(() -> {
-                    downloadStatusText.setText("Installed successfully!");
+                    downloadButton.setEnabled(true);
                     downloadProgress.setVisibility(View.GONE);
-                    Toast.makeText(MainActivity.this, "Antigravity CLI installed!", Toast.LENGTH_SHORT).show();
+                    String version = metadata != null ? " v" + metadata.version : "";
+                    downloadStatusText.setText("Antigravity CLI" + version + " installed.");
+                    Toast.makeText(MainActivity.this,
+                            "Antigravity CLI" + version + " installed!", Toast.LENGTH_SHORT).show();
                     updateDashboard();
-                    startCoreService();
                 });
             }
 
             @Override
             public void onError(final String error) {
                 handler.post(() -> {
-                    downloadStatusText.setText("Download failed: " + error);
-                    Toast.makeText(MainActivity.this, "Download error: " + error, Toast.LENGTH_LONG).show();
+                    downloadButton.setEnabled(true);
+                    downloadProgress.setVisibility(View.GONE);
+                    downloadStatusText.setText("Install failed: " + error);
+                    Toast.makeText(MainActivity.this, "Install error: " + error, Toast.LENGTH_LONG).show();
                 });
             }
         });

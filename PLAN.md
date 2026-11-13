@@ -1,11 +1,11 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `0f9250b` (review/hardening pass, pushed to
-  `main`), with this plan refresh applied after it. The fix pass before it was
-  `33e2bd7`; the original reviewed baseline was `d728f94` (`Initial version`).
-  Always inspect current `HEAD`, working-tree changes, and the latest
-  instruction snapshot before work.
+- **Current integrated revision:** `4168c62` (review/hardening pass, pushed to
+  `main`), plus an uncommitted B06 installer-preparation patch in this chat's
+  worktree. The fix pass before it was `0f9250b`, then `33e2bd7`; the original
+  reviewed baseline was `d728f94` (`Initial version`). Always inspect current
+  `HEAD`, working-tree changes, and the latest instruction snapshot before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -111,7 +111,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, C06, C07, C08a–c, G02a | `5c57a74` + AGENTS/PLAN snapshot; uncommitted worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; next executable task B05, then B03 |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, G02a | `4168c62` + AGENTS/PLAN snapshot; uncommitted worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
@@ -154,6 +154,9 @@ Antigravity CLI. It has:
 - Direct selection of the vendor's Android ARM64 manifest rather than the
   upstream installer's unreliable `uname -o` logic.
 - SHA-512 download verification and a tar extractor with basic path checks.
+- A transactional CLI installer preparation slice (B06): strict manifest/artifact
+  policy, ABI gate, bounded staging, AArch64 ELF check, atomic publish and an
+  install record; live session stop/restart and device evidence are pending.
 - A manual Gradle-free APK pipeline using `aapt`, Java compilation, D8, alignment,
   and `apksigner`.
 - An offline host-test entry point introduced by task A01.
@@ -187,10 +190,10 @@ Run:
 bash tests/run_host_tests.sh
 ```
 
-On 2026-11-13 the offline suite was extended and is green on the integrated
-revision: `bash tests/run_host_tests.sh` ran **38 Python cases and 30 Java
-checks, all passing (exit 0)**. The former seven expected failures (A02/R16,
-A05/R19, B02/R04) are now regressions, not permanent reds:
+On 2026-11-13 the offline suite was extended and is green: `bash
+tests/run_host_tests.sh` ran **38 Python cases and 37 Java checks, all passing
+(exit 0)** after the B06 installer-policy cases. The former seven expected
+failures (A02/R16, A05/R19, B02/R04) are now regressions, not permanent reds:
 
 - A02/R16: SDK propagation, invalid numeric input and control/escape characters.
 - A05/R19: data-descriptor input is rebuilt from central-directory metadata.
@@ -201,6 +204,8 @@ A05/R19, B02/R04) are now regressions, not permanent reds:
 - A04a/G02a: release signing refusal and no-unattended-publication workflow
   policy (`tests/python/test_release_guard.py`).
 - C07: concurrent atomic publication and failure preservation (Java runner).
+- B06: manifest/artifact origin, digest/version, ABI gate, free-space preflight,
+  AArch64/Android-linker ELF identity and strict install-record policy.
 
 The Java suite needs a JDK on `PATH`; this VM has none preinstalled, so the
 2026-11-13 pass used a workspace-local Temurin JDK 17. The suite still does not
@@ -235,8 +240,9 @@ B01 and must not be mistaken for completed safety work.
 
 These findings came from source review and local probes against the baseline.
 Method names and current behavior outrank old line numbers. On 2026-11-13,
-**R04, R16 and R19 are FIXED (offline evidence)**, **R07, R18, R20 are PARTIAL**,
-and the remaining R01–R23 are still OPEN. Section 3.2 records the per-bug state. “Reproduced” in this table means offline fixture
+**R04, R16 and R19 are FIXED (offline evidence)**, **R07, R18, R20 and R33 are
+PARTIAL**, and the remaining R01–R23 are still OPEN. Section 3.2 records the
+per-bug state. “Reproduced” in this table means offline fixture
 reproduction, not a device test, unless explicitly stated. Other implementation
 findings are source-confirmed; goal blockers record missing capabilities.
 
@@ -289,6 +295,7 @@ the new tests are checked in (section 3.2).
 | R30 | Low build/claim correctness, fixture-reproduced | `FAST_BUILD=0` and `1` both deflate a plain-text asset, despite advertised uncompressed/cache behavior; the orchestrator clears intermediates. | `modules/builder/06_package.sh:36,45–46`; `modules/builder/build_apk.sh:80–81,93–96`; `build.sh:6` | A09 |
 | R31 | Medium latent build correctness, fixture-reproduced | A valid secondary `classes2.dex` next to `classes.dex` is omitted silently from a successful APK. Today's small app is not claimed to require multidex. | `modules/builder/06_package.sh:12,33–37`; `modules/builder/04_dex.sh:22–28` | A07 |
 | R32 | High build verification, fixture-reproduced | Missing runtime asset input still produces a successful asset-free APK; existing compile smoke uses empty assets and cannot catch this packaging loss. | `modules/builder/06_package.sh:38–46`; `tests/run_build_smoke.sh:39,48–58`; runtime asset use `app/src/main/java/com/agy/runtime/CoreInstaller.java:38` | A08 |
+| R33 | High installer reliability, source-confirmed | `CliDownloader` checked no ABI, followed redirects off-origin, read the manifest without a bound, deleted the live binary before extraction, auto-started an install at launch, kept no install identity/record, and allowed two independent jobs. | `app/src/main/java/com/agy/runtime/CliDownloader.java` (deleted by the B06 preparation patch); `MainActivity.triggerDownload/promptDownload` | B06 |
 
 Fixture evidence from the read-only build audit: R29 ran the unchanged runner
 with both selection flags (exit 0, no suites); R30 packaged a fresh 4 KiB text
@@ -332,6 +339,7 @@ required device/integration check is still missing.
 | R30 | FIXED | `--fast` stores plain-text assets (ZIP_STORED) and the banner/cache claim is truthful. |
 | R31 | FIXED | All `classes*.dex` packaged or the build fails; invalid DEX/empty output rejected. |
 | R32 | FIXED | Runtime packaging fails when assets/marker/helper/CA are missing; `--compile-only` is explicit; smoke is labelled compile-only. |
+| R33 | PARTIAL | `CliInstallPolicy`/`CliInstallMetadata` + `CliInstaller` replace `CliDownloader`: ABI gate before network, exact manifest URL and approved HTTPS artifact host, redirects refused, bounded manifest and declared-size download, streaming SHA-512, conservative free-space check, unique cache staging, AArch64+linker ELF verification, unique sibling temp + same-directory atomic rename, strict install record, one job at a time, cancellation API, explicit Install/Update with no launch-time download. Offline regressions green; C02 live stop/restart integration, device install/upgrade and a real vendor download remain pending. |
 
 ## 4. Owner decisions and external gates
 
@@ -411,13 +419,15 @@ until E02 supplies the real terminal.
 
 ### 6.1 The next single-agent task
 
-B05 and B03 are now implemented and need device/real-archive acceptance. The next
-open implementation work is **B06** (transactional CLI installer, preparation
-split first) once B05's extraction is accepted, followed by **C01/C02** — but
-C01 formally depends on B01 being accepted, which needs the B01a/B01b/B04a device
-checks. Those checks (plus C06–C08 upgrade runs) are the real next step, not more
-unverified code. Build/parser fixes did not wait for consent work: that was a
-priority suggestion, not a technical dependency.
+B05 and B03 are now implemented and need device/real-archive acceptance. **B06's
+preparation slice is implemented and REVIEW**: the transactional installer and
+its offline policy exist, but live stop/restart integration is C02 and no device
+install/upgrade or real vendor download has run. The next executable work is
+therefore the device/real-environment acceptance batch: B01a/B01b/B04a, B03, B05,
+C06–C08 and B06 on API 24/25 and API 26+. C01/C02 become implementable only after
+B01 is accepted; C02 then owns live CLI replacement. Build/parser fixes did not
+wait for consent work: that was a priority suggestion, not a technical
+dependency.
 
 ### 6.2 Initial five-worker allocation
 
@@ -788,10 +798,11 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   absolute/cross-prefix links, devices, unsupported metadata, and oversize input
   must fail without escaping or touching the live install.
 
-#### B06 — One transactional native CLI installer — TODO
+#### B06 — One transactional native CLI installer — REVIEW (preparation slice implemented)
 
 - **Depends on:** A02, B05; C02 before live update wiring.
-- **Starting files:** `app/src/main/java/com/agy/runtime/CliDownloader.java`,
+- **Starting files:** `app/src/main/java/com/agy/runtime/CliInstaller.java`,
+  `CliInstallPolicy.java`, `CliInstallMetadata.java` in that directory,
   `app/src/main/java/com/agy/ui/MainActivity.java`, service installer/state API;
   dedicated fake-manifest/server/ELF fixtures. Split preparation from live update
   integration explicitly before assigning work that can proceed without C02.
@@ -802,6 +813,24 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - Keep the old CLI until same-filesystem atomic publication succeeds while the
   session is stopped. Persist version/hash/source/schema. Every failure and two
   rapid taps must leave one known runnable install and at most one job.
+- **Implemented 2026-11-13 (uncommitted preparation slice):** `CliInstallPolicy`
+  and `CliInstallMetadata` are Android-free policy/codec classes; `CliInstaller`
+  replaces `CliDownloader`. ABI gate before network, exact manifest URL,
+  approved HTTPS artifact host, redirects refused, bounded manifest and
+  declared-size download, streaming SHA-512, conservative free-space preflight,
+  unique cache staging, AArch64 plus Android-linker ELF verification, unique
+  sibling temp and same-directory atomic rename, strict install record, one job
+  at a time, cancellation API, and explicit Install/Update only (launch no
+  longer downloads). `triggerDownload` refuses while a published session, a
+  stdin owner, or onboarding is live. **Evidence:** B06 host cases in
+  `tests/java/HostTestRunner.java`; full suite 38 Python + 37 Java PASS;
+  `03_compile_java.sh` compiles 78 classes against `tools/android.jar`; full
+  `tests/run_build_smoke.sh` PASS for both flavors (100 classes, compile-only
+  assets).
+- **Why still REVIEW:** live update stop/restart orchestration is C02; no device
+  install/upgrade run, no real vendor download, no interrupted-download/
+  low-space device test, and the ELF/linker check is metadata, not a spawn proof
+  or Bionic execution proof.
 
 #### B07 — Remove or authenticate external URL broadcasts — REVIEW (input removed; C01 pending)
 
@@ -1316,9 +1345,10 @@ the exact missing check, not DONE and not “nothing accomplished.”
 | G03 / 2026-11-11 | Uncommitted documentation patch on `d728f94`, only `AGENTS.md`/`PLAN.md`. Inline Python validation PASS: original product sections 2–5 preserved verbatim, all old task IDs retained, 51 unique cards, all task references resolve, R01–R32 each registered once, P1–P6 retained, balanced fences, only two Markdown paths changed. `git diff --check` PASS. Independent read-only workflow review PASS (no blocking scope/dependency/ownership contradictions). | DONE for documentation only; all production bugs remain open. No commit, release, signing, account/user-data change, or device test. |
 | Single-agent pass / 2026-11-13 (`33e2bd7`) | Committed and pushed to `main`. Build: A02, A05–A09, A04a guard. Runtime: B01a/B01b consent removal, B02 URL policy, B04a unsolicited-auth removal, C06 API-24 cleanup, C07 atomic writer, C08a–c asset publication, G02a workflow guard. Second slice in the same commit: B03 WebView exact-origin/permission policy, B05/R09 pure tar policy + extractor wiring, B07 public-broadcast removal. Checks actually run: `bash tests/run_host_tests.sh` → PASS, 33 Python + 29 Java cases; `bash tests/run_build_smoke.sh` → PASS both flavors (98 classes, D8, package, system zipalign); `bash -n` every edited shell script → clean; `08_sign.sh` release guard → exit 3 without invoking the signer. Workspace-local JDK 17 and build-tools r34 were used only for checks and removed. | DONE (offline): A02, A04a, A05, A06, A07, A08, A09, B02, G02a. REVIEW (device/real-archive/integration evidence missing): A03 (not started), B01a, B01b, B03, B04a, B05, B07, C06, C07, C08a–c. PARTIAL bugs: R05, R07, R09, R18, R20, R23, R24–R28. Not performed: device/API 24–25 tests, APK install/upgrade, real signing, vendor login, real tar extraction, WebView device matrix, lifecycle (C01/C02), or any publication. |
 | Review/hardening pass / 2026-11-13 (`0f9250b`) | Exact-host HTTPS auth policy; per-flavor `/proc` cleanup scope; URL watcher no longer retains the Process or writes stdin; non-browser WebView schemes blocked; cleartext disabled outside loopback; write failures surfaced; archive comments preserved; NDK fail-closed helper staging with ELF/16 KB checks; tracked stale helper removed; CI builds only the development edition and publication stays refused. Added `ProcessScope`, `test_stage_assets.py`, align/package/host cases. Checks: host suite PASS 38 Python + 30 Java; build smoke PASS both flavors; `bash -n` clean; workflow YAML parses. | DONE (offline): A03 staging policy, A06, B03/B05/B07 hardening. PARTIAL: R01/R05/R17/R23 pending device/NDK/CI evidence. No device run, real NDK compile, signing, network, vendor login, or publication. |
+| B06 preparation slice / 2026-11-13 (uncommitted on `4168c62`) | Replaced `CliDownloader` with `CliInstallPolicy` + `CliInstallMetadata` + `CliInstaller`: explicit Install/Update only, ABI gate before network, exact manifest URL, approved artifact host, redirects refused, bounded manifest/download, streaming SHA-512, free-space preflight, unique staging, AArch64+linker ELF check, atomic publish, strict install record, one job, cancellation. `triggerDownload` refuses while a published session, stdin owner, or onboarding is live; the dashboard shows the installed version. Checks: `bash tests/run_host_tests.sh` → 38 Python + 37 Java PASS, exit 0; `01_gen_config.py` + `03_compile_java.sh` → 78 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, 100 classes, exit 0 (compile-only assets, no native/runtime proof). | REVIEW: live stop/restart integration is C02; no device install/upgrade, real vendor download, or interrupted/low-space device run. ELF check is metadata, not spawn/Bionic proof. No APK install, signing, or publication. |
 
 The 2026-11-13 passes left the suite green: `bash tests/run_host_tests.sh` → 38
-Python + 30 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
+Python + 37 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
 flavors compile/dex/package/align (still compile-only assets and the system ZIP
 aligner, not native/runtime proof). A06 was verified by direct invocation:
 `--python-only --java-only` → exit 2, unknown arg → exit 2, `--help` → exit 0,
@@ -1328,9 +1358,9 @@ discovery), so A06 remains REVIEW. No signing, installation, network or device
 operation was performed.
 
 **Next task:** device acceptance for B01a/B01b/B04a and C06–C08 on API 24/25 and
-API 26+, then B05's real-archive extraction and B03's WebView origin/permission
-matrix. B06 can start its non-live preparation slice after B05 acceptance. No
-worker is assigned; see the ledger and section 3.2.
+API 26+, then B05's real-archive extraction, B03's WebView origin/permission
+matrix, and B06's device install/update. B06's live replacement of a running CLI
+is C02 after C01. No worker is assigned; see the ledger and section 3.2.
 
 Future rows must name actual commands, results, accepted revision/patch identity,
 reviewer (if any), and missing device/artifact evidence. Do not paste entire logs

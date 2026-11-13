@@ -126,6 +126,8 @@ EOF
         "$PROJECT_ROOT/app/src/main/java/com/agy/install/TarHeader.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/install/TarPolicy.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/install/TarPath.java" \
+        "$PROJECT_ROOT/app/src/main/java/com/agy/runtime/CliInstallPolicy.java" \
+        "$PROJECT_ROOT/app/src/main/java/com/agy/runtime/CliInstallMetadata.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/util/AtomicFileWriter.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/util/IoUtil.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/log/LogRedactor.java" \

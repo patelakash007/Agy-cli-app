@@ -86,7 +86,7 @@ public final class RuntimeManager {
 
     /** Native command to launch Google Antigravity CLI in Remote Control mode. */
     public String[] coreCommand() {
-        File cliBin = CliDownloader.getCliBinary(appContext);
+        File cliBin = CliInstaller.getCliBinary(appContext);
         if (!cliBin.isFile()) {
             cliBin = new File(getBinDir(), "agy");
         }
