@@ -1,9 +1,10 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `41cdd05` (B06 transactional-installer
-  preparation slice, pushed to `main`). Before it were `4168c62` (review/
-  hardening pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was
+- **Current integrated revision:** `0606eb7` on `main` (B06 installer slice),
+  plus an uncommitted F02/G01 share + permission + truthfulness pass in this
+  chat's worktree. Before `41cdd05`/`0606eb7` were `4168c62` (review/hardening
+  pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was
   `d728f94` (`Initial version`). Always inspect current `HEAD`, working-tree
   changes, and the latest instruction snapshot before work.
 - **Plan state:** Active; the finished product does not exist yet.
@@ -111,7 +112,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, G02a | `4168c62` + AGENTS/PLAN snapshot; uncommitted worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `0606eb7` + AGENTS/PLAN snapshot; uncommitted worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
@@ -191,8 +192,8 @@ bash tests/run_host_tests.sh
 ```
 
 On 2026-11-13 the offline suite was extended and is green: `bash
-tests/run_host_tests.sh` ran **38 Python cases and 37 Java checks, all passing
-(exit 0)** after the B06 installer-policy cases. The former seven expected
+tests/run_host_tests.sh` ran **41 Python cases and 38 Java checks, all passing
+(exit 0)** after the B06 installer-policy and F02 share/permission cases. The former seven expected
 failures (A02/R16, A05/R19, B02/R04) are now regressions, not permanent reds:
 
 - A02/R16: SDK propagation, invalid numeric input and control/escape characters.
@@ -206,6 +207,8 @@ failures (A02/R16, A05/R19, B02/R04) are now regressions, not permanent reds:
 - C07: concurrent atomic publication and failure preservation (Java runner).
 - B06: manifest/artifact origin, digest/version, ABI gate, free-space preflight,
   AArch64/Android-linker ELF identity and strict install-record policy.
+- F02/R34–R35: share-provider containment/read-only policy and manifest
+  permission minimization.
 
 The Java suite needs a JDK on `PATH`; this VM has none preinstalled, so the
 2026-11-13 pass used a workspace-local Temurin JDK 17. The suite still does not
@@ -240,9 +243,9 @@ B01 and must not be mistaken for completed safety work.
 
 These findings came from source review and local probes against the baseline.
 Method names and current behavior outrank old line numbers. On 2026-11-13,
-**R04, R16 and R19 are FIXED (offline evidence)**, **R07, R18, R20 and R33 are
-PARTIAL**, and the remaining R01–R23 are still OPEN. Section 3.2 records the
-per-bug state. “Reproduced” in this table means offline fixture
+**R04, R16, R19 and R35 are FIXED (offline evidence)**, **R07, R18, R20, R33 and
+R34 are PARTIAL**, and the remaining R01–R23 are still OPEN. Section 3.2 records
+the per-bug state. “Reproduced” in this table means offline fixture
 reproduction, not a device test, unless explicitly stated. Other implementation
 findings are source-confirmed; goal blockers record missing capabilities.
 
@@ -296,6 +299,8 @@ the new tests are checked in (section 3.2).
 | R31 | Medium latent build correctness, fixture-reproduced | A valid secondary `classes2.dex` next to `classes.dex` is omitted silently from a successful APK. Today's small app is not claimed to require multidex. | `modules/builder/06_package.sh:12,33–37`; `modules/builder/04_dex.sh:22–28` | A07 |
 | R32 | High build verification, fixture-reproduced | Missing runtime asset input still produces a successful asset-free APK; existing compile smoke uses empty assets and cannot catch this packaging loss. | `modules/builder/06_package.sh:38–46`; `tests/run_build_smoke.sh:39,48–58`; runtime asset use `app/src/main/java/com/agy/runtime/CoreInstaller.java:38` | A08 |
 | R33 | High installer reliability, source-confirmed | `CliDownloader` checked no ABI, followed redirects off-origin, read the manifest without a bound, deleted the live binary before extraction, auto-started an install at launch, kept no install identity/record, and allowed two independent jobs. | `app/src/main/java/com/agy/runtime/CliDownloader.java` (deleted by the B06 preparation patch); `MainActivity.triggerDownload/promptDownload` | B06 |
+| R34 | High file-sharing exposure, source-confirmed | `AppFileProvider` addressed absolute app paths and allowed `filesDir`, `cacheDir`, the whole app data directory, external storage and external files/cache — including `.gemini` credentials, the CLI and prefix — and accepted write/read-write modes. | `app/src/main/java/com/agy/util/AppFileProvider.java` (deleted broad-root resolver); `UriDispatcher`/`DocumentsContractHelper` (deleted, unused) | F02 |
+| R35 | Medium over-permission, source-confirmed | The manifest requested all-files access, legacy shared-storage read/write, notification and battery-exemption permissions, and every launch opened the all-files settings page, although the app uses only app-internal storage and SAF. | `app/src/main/AndroidManifest.xml:35–41`; `MainActivity.requestStoragePermissions` | F02, G01 |
 
 Fixture evidence from the read-only build audit: R29 ran the unchanged runner
 with both selection flags (exit 0, no suites); R30 packaged a fresh 4 KiB text
@@ -328,7 +333,7 @@ required device/integration check is still missing.
 | R17 | PARTIAL | Staging always compiles `agy-pty.c` into `build/native/arm64-v8a` with a required NDK clang, verifies ELF64/AArch64/linker/16 KB `p_align`, stages no fabricated seed state, and never reads or mutates the tracked binary (deleted). A real NDK/CI build remains the missing evidence. |
 | R18 | PARTIAL | Release signing fails closed without owner inputs (exit 3, signer not invoked); A04b identity/migration still BLOCKED (P3). |
 | R19 | FIXED | Aligner rebuilds headers from the central directory; data descriptors preserved; ZIP64/encryption/unknown methods rejected. |
-| R20 | PARTIAL | G02a guard: tags no longer publish, least-privilege permissions, explicit `PUBLISH` + protected environment, release job still refuses. G02b remains blocked. |
+| R20 | PARTIAL | G02a guard: tags no longer publish, least-privilege permissions, explicit `PUBLISH` + protected environment, release job still refuses. First G01 pass removed false release-body claims, the dead vendor-input download and unused notification/battery permissions; the final claims pass remains. G02b remains blocked. |
 | R23 | PARTIAL | Public `ACTION_OPEN_URL` broadcast input and the shim's `am broadcast` fallback were removed; discovery uses owned CLI stdout only. C01 generation-aware state remains required for full closure. |
 | R24 | PARTIAL | API-26 `destroyForcibly`/timed `waitFor` guarded or replaced; teardown steps isolated with `Throwable`. API 24/25 device run still pending. |
 | R25 | PARTIAL | Writer-owned unique temporaries, atomic rename, no in-place fallback; host concurrency tests pass. Android callers not device-tested. |
@@ -339,6 +344,8 @@ required device/integration check is still missing.
 | R30 | FIXED | `--fast` stores plain-text assets (ZIP_STORED) and the banner/cache claim is truthful. |
 | R31 | FIXED | All `classes*.dex` packaged or the build fails; invalid DEX/empty output rejected. |
 | R32 | FIXED | Runtime packaging fails when assets/marker/helper/CA are missing; `--compile-only` is explicit; smoke is labelled compile-only. |
+| R34 | PARTIAL | `SharePathPolicy` + hardened `AppFileProvider` expose only read-only regular files under `filesDir/share` via relative ids; absolute app paths, `.gemini`/CLI/prefix/log data, traversal, dot/empty segments, control characters, symlink escapes, directories and write modes are rejected. Offline R34 regression passes. Full F02 browser/editor and device grant tests remain. |
+| R35 | FIXED | All-files, legacy shared-storage, notification and battery-exemption permissions, `requestLegacyExternalStorage` and the launch all-files prompt were removed; static manifest regression plus share-provider tests pass. No device matrix run. |
 | R33 | PARTIAL | `CliInstallPolicy`/`CliInstallMetadata` + `CliInstaller` replace `CliDownloader`: ABI gate before network, exact manifest URL and approved HTTPS artifact host, redirects refused, bounded manifest and declared-size download, streaming SHA-512, conservative free-space check, unique cache staging, AArch64+linker ELF verification, unique sibling temp + same-directory atomic rename, strict install record, one job at a time, cancellation API, explicit Install/Update with no launch-time download. Offline regressions green; C02 live stop/restart integration, device install/upgrade and a real vendor download remain pending. |
 
 ## 4. Owner decisions and external gates
@@ -425,7 +432,9 @@ its offline policy exist, but live stop/restart integration is C02 and no device
 install/upgrade or real vendor download has run. The next executable work is
 therefore the device/real-environment acceptance batch: B01a/B01b/B04a, B03, B05,
 C06–C08 and B06 on API 24/25 and API 26+. C01/C02 become implementable only after
-B01 is accepted; C02 then owns live CLI replacement. Build/parser fixes did not
+B01 is accepted; C02 then owns live CLI replacement. F02's share/permission
+mitigation (R34/R35) and G01's first truthful-text pass are REVIEW with offline
+evidence; they do not finish their parent features. Build/parser fixes did not
 wait for consent work: that was a priority suggestion, not a technical
 dependency.
 
@@ -575,6 +584,13 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   machine, Android linker, dependencies, RUNPATH, API target, and page-size support.
 - Missing/failed toolchains must fail. Local and CI checks must agree and record
   versions/provenance.
+- **Local evidence 2026-11-13:** NDK `27.0.12077973`
+  (`aarch64-linux-android24-clang`) compiled `agy-pty.c`; `05_stage_assets.py`
+  verified ELF64/AArch64/`/system/bin/linker64`/16 KB alignment and staged it
+  with the CA bundle. The full pipeline compiled 88 classes, D8 produced one
+  DEX, and non-compile-only packaging produced a 359,681-byte APK containing the
+  marker, helper and CA bundle (ELF magic confirmed inside the archive). CI
+  provenance and device execution remain the missing acceptance.
 
 #### A04 — Separate development and private release signing — BLOCKED (P3)
 
@@ -660,6 +676,9 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   success report; fixture assets survive with exact bytes; shipped runtime marker,
   helper ELF, and CA inventory are checked using A03 output. No signing/network or
   mutation of a tracked native binary. Keep existing compile smoke coverage.
+- **Native-asset evidence 2026-11-13:** with the NDK 27 helper, non-compile-only
+  packaging required and included `runtime/runtime.marker`,
+  `runtime/bin/agy-pty` and `runtime/certs/ca-certificates.crt`.
 
 #### A09 — Make fast-build behavior truthful — DONE (offline)
 
@@ -772,6 +791,8 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   callback fixtures cause no stdin bytes or fabricated success; resuming the UI
   does not read clipboard automatically. Tests state what valid auth is not yet
   supported. Serialize UI edits with B01/B02/B03/C01.
+- **Residual cleanup 2026-11-13:** the dead success-callback/toast plumbing in
+  `MainActivity` was removed; deep links are shape-checked and ignored.
 
 ##### B04b — Verified generation-bound auth flow — BLOCKED (V1)
 
@@ -1112,7 +1133,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - Set CLI/shell cwd before spawn. Switching workspace is a controlled session
   transition; HOME/auth/history stay stable and vendor records are not fabricated.
 
-#### F02 — Bounded file browser/editor and narrow sharing — TODO
+#### F02 — Bounded file browser/editor and narrow sharing — REVIEW (provider mitigation implemented; browser/editor gated)
 
 - **Depends on:** F01, E02.
 - **Starting files:** `app/src/main/java/com/agy/util/AppFileProvider.java`,
@@ -1124,6 +1145,15 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   checked atomic saves with visible failure and no original-data loss.
 - FileProvider roots/grants must exclude credentials/runtime/prefix/full app data;
   default exact-file read-only shares; deny traversal and symlink escape.
+- **Mitigation implemented 2026-11-13 (offline):** `SharePathPolicy` and the
+  hardened, read-only `AppFileProvider` expose only regular files below
+  `filesDir/share` using relative ids. Absolute app paths, `.gemini`/CLI/prefix/
+  log data, traversal, dot/empty segments, control characters, symlink escapes,
+  directories and write modes are rejected. The unused raw-path
+  `DocumentsContractHelper` and `UriDispatcher` were deleted. **Evidence:** R34
+  case in `tests/java/HostTestRunner.java`; manifest-permission regression in
+  `tests/python/test_manifest_permissions.py`. **Still gated:** the real file
+  browser/editor (F01/E02), SAF import/export (F03) and device grant tests.
 
 #### F03 — Real SAF import/export — TODO
 
@@ -1165,7 +1195,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 
 ### G — Truthful release gates
 
-#### G01 — Reconcile all user-facing claims and legacy components — TODO
+#### G01 — Reconcile all user-facing claims and legacy components — REVIEW (first truthful-text pass done; final pass after M1)
 
 - **Depends on:** update after every task; final pass after M1.
 - **Starting files:** `app/src/main/java/com/agy/ui/MainActivity.java`,
@@ -1177,6 +1207,14 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   features. Remove or accurately classify unused flags/components only after
   reference/test inspection.
 - Keep the two-document policy; update this plan instead of recreating module docs.
+- **First pass 2026-11-13:** the UI subtitle now says it is an unofficial host
+  rather than claiming official status; the dashboard says the CLI is running
+  with a Remote Control session available instead of "connected", and no longer
+  presents the heuristic CLI-output email as authenticated; dead
+  authentication-success callbacks/toasts were removed. The unreachable release
+  body now states unofficial status, development-only scope and unmeasured
+  items; workflow and job names are development-only; the unused vendor-input
+  download was removed. The final claims/legacy audit stays after M1.
 
 #### G02 — Make publication depend on meaningful evidence — BLOCKED
 
@@ -1347,8 +1385,11 @@ the exact missing check, not DONE and not “nothing accomplished.”
 | Review/hardening pass / 2026-11-13 (`0f9250b`) | Exact-host HTTPS auth policy; per-flavor `/proc` cleanup scope; URL watcher no longer retains the Process or writes stdin; non-browser WebView schemes blocked; cleartext disabled outside loopback; write failures surfaced; archive comments preserved; NDK fail-closed helper staging with ELF/16 KB checks; tracked stale helper removed; CI builds only the development edition and publication stays refused. Added `ProcessScope`, `test_stage_assets.py`, align/package/host cases. Checks: host suite PASS 38 Python + 30 Java; build smoke PASS both flavors; `bash -n` clean; workflow YAML parses. | DONE (offline): A03 staging policy, A06, B03/B05/B07 hardening. PARTIAL: R01/R05/R17/R23 pending device/NDK/CI evidence. No device run, real NDK compile, signing, network, vendor login, or publication. |
 | B06 preparation slice / 2026-11-13 (`41cdd05`, pushed to `main`) | Replaced `CliDownloader` with `CliInstallPolicy` + `CliInstallMetadata` + `CliInstaller`: explicit Install/Update only, ABI gate before network, exact manifest URL, approved artifact host, redirects refused, bounded manifest/download, streaming SHA-512, free-space preflight, unique staging, AArch64+linker ELF check, atomic publish, strict install record, one job, cancellation. `triggerDownload` refuses while a published session, stdin owner, or onboarding is live; the dashboard shows the installed version. Checks: `bash tests/run_host_tests.sh` → 38 Python + 37 Java PASS, exit 0; `01_gen_config.py` + `03_compile_java.sh` → 78 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, 100 classes, exit 0 (compile-only assets, no native/runtime proof). | REVIEW: live stop/restart integration is C02; no device install/upgrade, real vendor download, or interrupted/low-space device run. ELF check is metadata, not spawn/Bionic proof. No APK install, signing, or publication. |
 
-The 2026-11-13 passes left the suite green: `bash tests/run_host_tests.sh` → 38
-Python + 37 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
+| A03/A08 native evidence / 2026-11-13 (`0606eb7` base, uncommitted) | Built the PTY helper with NDK `27.0.12077973`; staging verified ELF64/AArch64/linker64/16 KB; full pipeline compiled 88 classes, D8 produced one DEX, and non-compile-only packaging produced a 359,681-byte APK containing 1 DEX and the 3 required runtime assets. | PARTIAL: A03 still needs CI provenance and device execution; A08 stays DONE offline with its native gate now locally exercised. No signing, install or publication. |
+| F02/G01 safety + truthfulness pass / 2026-11-13 (`0606eb7` base, uncommitted) | Share: `SharePathPolicy` + read-only `AppFileProvider` limited to `filesDir/share`, relative ids, no write modes, traversal/dot/empty/control/symlink rejection; deleted unused raw-path `DocumentsContractHelper` and `UriDispatcher`. Permissions: removed all-files, legacy shared-storage, notification and battery-exemption permissions, `requestLegacyExternalStorage` and the launch prompt. Claims: honest UI subtitle/status, suppressed heuristic email, removed dead auth-success callbacks, rewrote the release body, development-only workflow/job names, removed the dead vendor-input download. Checks: `bash tests/run_host_tests.sh` → 41 Python + 38 Java PASS, exit 0; `03_compile_java.sh` → 77 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, exit 0; workflow YAML parses; `git diff --check` clean. | PARTIAL: R34/F02 offline mitigation only (file browser/editor and device grant tests pending); R35 fixed offline; G01 first pass only. No device run, signing, download or publication. |
+
+The 2026-11-13 passes left the suite green: `bash tests/run_host_tests.sh` → 41
+Python + 38 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
 flavors compile/dex/package/align (still compile-only assets and the system ZIP
 aligner, not native/runtime proof). A06 was verified by direct invocation:
 `--python-only --java-only` → exit 2, unknown arg → exit 2, `--help` → exit 0,
@@ -1359,8 +1400,9 @@ operation was performed.
 
 **Next task:** device acceptance for B01a/B01b/B04a and C06–C08 on API 24/25 and
 API 26+, then B05's real-archive extraction, B03's WebView origin/permission
-matrix, and B06's device install/update. B06's live replacement of a running CLI
-is C02 after C01. No worker is assigned; see the ledger and section 3.2.
+matrix, B06's device install/update, and F02's share-provider grant tests. B06's
+live replacement of a running CLI is C02 after C01; G01's final claims audit is
+after M1. No worker is assigned; see the ledger and section 3.2.
 
 Future rows must name actual commands, results, accepted revision/patch identity,
 reviewer (if any), and missing device/artifact evidence. Do not paste entire logs

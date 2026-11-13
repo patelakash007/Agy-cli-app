@@ -130,6 +130,8 @@ EOF
         "$PROJECT_ROOT/app/src/main/java/com/agy/runtime/CliInstallMetadata.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/util/AtomicFileWriter.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/util/IoUtil.java" \
+        "$PROJECT_ROOT/app/src/main/java/com/agy/util/PathSafety.java" \
+        "$PROJECT_ROOT/app/src/main/java/com/agy/util/SharePathPolicy.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/log/LogRedactor.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/util/ErrorText.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/util/ShellQuote.java" \

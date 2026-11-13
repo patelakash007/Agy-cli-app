@@ -5,7 +5,6 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -53,13 +52,13 @@ import java.io.File;
 import java.io.FileReader;
 
 /**
- * Antigravity for Android:
- * Embedded Google Remote Control Studio powered by official native Bionic CLI engine.
+ * Antigravity for Android: an unofficial host for Google's official native
+ * Bionic Antigravity CLI, with an embedded WebView for the hosted Remote Control
+ * surface. This app is not a Google product or endorsed by Google (G01).
  */
 public class MainActivity extends Activity {
 
     private static final String TAG = "MainActivity";
-    private static final int REQUEST_STORAGE = 100;
     private static final int REQUEST_FILE_CHOOSER = 200;
 
     private static final int VIEW_DASHBOARD = 0;
@@ -118,7 +117,6 @@ public class MainActivity extends Activity {
         runtimeManager = new RuntimeManager(this);
 
         buildUnifiedUI();
-        requestStoragePermissions();
 
         // Check if intent contains a session URL or deep link
         if (getIntent() != null && getIntent().hasExtra("session_url")) {
@@ -127,12 +125,9 @@ public class MainActivity extends Activity {
                 loadSessionUrl(url);
             }
         } else {
-            oauthManager.handleDeepLink(this, getIntent(), () -> {
-                Toast.makeText(this, "Authentication successful! Establishing Remote Control session...", Toast.LENGTH_SHORT).show();
-                if (CoreRuntimeState.isValidSessionUrl(CoreRuntimeState.serverUrl)) {
-                    loadSessionUrl(CoreRuntimeState.serverUrl);
-                }
-            });
+            // Shape-only callback: no verified active correlation exists yet, so
+            // nothing is accepted and no success is announced (B04a/V1).
+            oauthManager.handleDeepLink(this, getIntent(), null);
         }
 
         if (CliInstaller.isInstalled(this)) {
@@ -152,12 +147,9 @@ public class MainActivity extends Activity {
                 loadSessionUrl(url);
             }
         }
-        oauthManager.handleDeepLink(this, intent, () -> {
-            Toast.makeText(this, "Authentication successful! Establishing Remote Control session...", Toast.LENGTH_SHORT).show();
-            if (CoreRuntimeState.isValidSessionUrl(CoreRuntimeState.serverUrl)) {
-                loadSessionUrl(CoreRuntimeState.serverUrl);
-            }
-        });
+        // Shape-only callback: accepted for this flavor, never treated as a
+        // completed login (B04a/V1).
+        oauthManager.handleDeepLink(this, intent, null);
     }
 
     private boolean isNightMode() {
@@ -496,7 +488,7 @@ public class MainActivity extends Activity {
         titleBox.addView(title);
 
         TextView subTitle = new TextView(this);
-        subTitle.setText("Official Bionic CLI • Embedded Studio");
+        subTitle.setText("Unofficial host • Google's native Bionic CLI");
         subTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         subTitle.setTextColor(subTextColor);
         titleBox.addView(subTitle);
@@ -766,10 +758,9 @@ public class MainActivity extends Activity {
             }
         } else if (CoreRuntimeState.isValidSessionUrl(sessionUrl)) {
             setBadge("READY", Color.parseColor("#2E7D32"));
-            String userTag = CoreRuntimeState.authenticatedEmail != null
-                    ? " (" + CoreRuntimeState.authenticatedEmail + ")"
-                    : "";
-            infoText.setText("Google Antigravity CLI active & connected" + userTag);
+            // A published session URL is not proof of authentication or of a live
+            // remote connection (R10/F04); do not present either as fact.
+            infoText.setText("CLI running; Remote Control session available");
             sessionUrlText.setText("Session: " + sessionUrl);
             openRemoteButton.setEnabled(true);
             openRemoteButton.setAlpha(1.0f);
@@ -990,28 +981,6 @@ public class MainActivity extends Activity {
         if (cm != null) {
             cm.setPrimaryClip(ClipData.newPlainText("Antigravity Logs", logTextView.getText()));
             Toast.makeText(this, "Logs copied to clipboard", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void requestStoragePermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                if (!android.os.Environment.isExternalStorageManager()) {
-                    Intent intent = new Intent(
-                            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                    intent.setData(Uri.parse("package:" + getPackageName()));
-                    startActivity(intent);
-                }
-            } catch (Exception ignored) {
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{
-                        android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                }, REQUEST_STORAGE);
-            }
         }
     }
 

@@ -10,8 +10,9 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Manages the native Antigravity CLI runtime, network configuration,
- * onboarding seed files, and fallback shell bridges.
+ * Manages the native Antigravity CLI runtime, network configuration and
+ * fallback shell bridges. Vendor setup state under .gemini is user-owned and is
+ * never seeded by the host (B01).
  *
  * targetSdk 28 is required so the native CLI binary can be exec'd from the data dir.
  */
@@ -77,9 +78,7 @@ public final class RuntimeManager {
         return paths.getProjectsDir();
     }
 
-    /**
-     * Prepares network configuration, DNS settings, onboarding seeds, and shell shims.
-     */
+    /** Prepares network configuration, DNS settings and shell shims. */
     public synchronized void installCore() {
         CoreInstaller.installCore(this);
     }

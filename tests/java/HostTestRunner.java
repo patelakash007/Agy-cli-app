@@ -9,6 +9,7 @@ import com.agy.runtime.CliInstallMetadata;
 import com.agy.runtime.CliInstallPolicy;
 import com.agy.util.AtomicFileWriter;
 import com.agy.util.ErrorText;
+import com.agy.util.SharePathPolicy;
 import com.agy.util.ShellQuote;
 
 import java.io.File;
@@ -394,6 +395,66 @@ public final class HostTestRunner {
             assertTrue(CliInstallMetadata.parse(text + repeatedHex('x',
                             CliInstallMetadata.MAX_BYTES)) == null,
                     "oversized install record was accepted");
+        });
+
+        // F02/R34: the share provider must expose only read-only files under
+        // filesDir/share, never credentials, the CLI, the prefix or app data.
+        test("share policy exposes only read-only files under share/", "R34", () -> {
+            File files = Files.createTempDirectory("agy-share-").toFile();
+            try {
+                File share = new File(files, SharePathPolicy.SHARE_DIR);
+                File docs = new File(share, "docs");
+                assertTrue(docs.mkdirs(), "cannot create the share tree");
+                File inside = new File(docs, "notes.txt");
+                Files.write(inside.toPath(), "hello".getBytes(StandardCharsets.UTF_8));
+                File secret = new File(files, ".gemini/token");
+                assertTrue(secret.getParentFile().mkdirs(), "cannot create credential fixture");
+                Files.write(secret.toPath(), "secret".getBytes(StandardCharsets.UTF_8));
+
+                assertEquals("docs/notes.txt", SharePathPolicy.relativeId(share, inside),
+                        "share id");
+                File resolved = SharePathPolicy.resolve(share, "/docs/notes.txt");
+                assertTrue(resolved != null, "share id did not resolve");
+                assertEquals(inside.getCanonicalPath(), resolved.getCanonicalPath(),
+                        "resolved share file");
+                assertTrue(SharePathPolicy.relativeId(share, secret) == null,
+                        "credentials were shareable");
+                assertTrue(SharePathPolicy.relativeId(share, files) == null,
+                        "app root was shareable");
+                assertTrue(SharePathPolicy.relativeId(share, share) == null,
+                        "share root was shareable");
+                assertTrue(SharePathPolicy.resolve(share, "../.gemini/token") == null,
+                        "traversal id resolved");
+                File absolute = SharePathPolicy.resolve(share,
+                        "/data/user/0/com.agy/files/.gemini/token");
+                assertTrue(absolute == null
+                                || absolute.getCanonicalPath().startsWith(
+                                        share.getCanonicalPath() + File.separator),
+                        "absolute app path escaped the share root");
+                assertTrue(SharePathPolicy.resolve(share, "docs/./notes.txt") == null,
+                        "dot segment resolved");
+                assertTrue(SharePathPolicy.resolve(share, "docs//notes.txt") == null,
+                        "empty segment resolved");
+                assertTrue(SharePathPolicy.resolve(share, "docs/notes\u0000") == null,
+                        "control character resolved");
+                assertTrue(SharePathPolicy.isReadOnlyMode("r"), "'r' mode rejected");
+                assertFalse(SharePathPolicy.isReadOnlyMode("w"), "write mode accepted");
+                assertFalse(SharePathPolicy.isReadOnlyMode("rw"), "read-write mode accepted");
+                assertFalse(SharePathPolicy.isReadOnlyMode("wa"), "append mode accepted");
+                assertFalse(SharePathPolicy.isReadOnlyMode(null), "null mode accepted");
+
+                File link = new File(share, "escape");
+                try {
+                    Files.createSymbolicLink(link.toPath(), secret.toPath());
+                    assertTrue(SharePathPolicy.resolve(share, "escape") == null,
+                            "symlink escape resolved");
+                } catch (UnsupportedOperationException | java.io.IOException ignored) {
+                    // Filesystem without symlink support; containment is still
+                    // covered by the traversal and absolute-path cases.
+                }
+            } finally {
+                deleteAtomicTree(files);
+            }
         });
 
         System.out.println();
