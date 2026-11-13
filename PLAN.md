@@ -1,11 +1,11 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `4168c62` (review/hardening pass, pushed to
-  `main`), plus an uncommitted B06 installer-preparation patch in this chat's
-  worktree. The fix pass before it was `0f9250b`, then `33e2bd7`; the original
-  reviewed baseline was `d728f94` (`Initial version`). Always inspect current
-  `HEAD`, working-tree changes, and the latest instruction snapshot before work.
+- **Current integrated revision:** `41cdd05` (B06 transactional-installer
+  preparation slice, pushed to `main`). Before it were `4168c62` (review/
+  hardening pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was
+  `d728f94` (`Initial version`). Always inspect current `HEAD`, working-tree
+  changes, and the latest instruction snapshot before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -813,7 +813,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - Keep the old CLI until same-filesystem atomic publication succeeds while the
   session is stopped. Persist version/hash/source/schema. Every failure and two
   rapid taps must leave one known runnable install and at most one job.
-- **Implemented 2026-11-13 (uncommitted preparation slice):** `CliInstallPolicy`
+- **Implemented 2026-11-13 (preparation slice, committed as `41cdd05`):** `CliInstallPolicy`
   and `CliInstallMetadata` are Android-free policy/codec classes; `CliInstaller`
   replaces `CliDownloader`. ABI gate before network, exact manifest URL,
   approved HTTPS artifact host, redirects refused, bounded manifest and
@@ -1345,7 +1345,7 @@ the exact missing check, not DONE and not “nothing accomplished.”
 | G03 / 2026-11-11 | Uncommitted documentation patch on `d728f94`, only `AGENTS.md`/`PLAN.md`. Inline Python validation PASS: original product sections 2–5 preserved verbatim, all old task IDs retained, 51 unique cards, all task references resolve, R01–R32 each registered once, P1–P6 retained, balanced fences, only two Markdown paths changed. `git diff --check` PASS. Independent read-only workflow review PASS (no blocking scope/dependency/ownership contradictions). | DONE for documentation only; all production bugs remain open. No commit, release, signing, account/user-data change, or device test. |
 | Single-agent pass / 2026-11-13 (`33e2bd7`) | Committed and pushed to `main`. Build: A02, A05–A09, A04a guard. Runtime: B01a/B01b consent removal, B02 URL policy, B04a unsolicited-auth removal, C06 API-24 cleanup, C07 atomic writer, C08a–c asset publication, G02a workflow guard. Second slice in the same commit: B03 WebView exact-origin/permission policy, B05/R09 pure tar policy + extractor wiring, B07 public-broadcast removal. Checks actually run: `bash tests/run_host_tests.sh` → PASS, 33 Python + 29 Java cases; `bash tests/run_build_smoke.sh` → PASS both flavors (98 classes, D8, package, system zipalign); `bash -n` every edited shell script → clean; `08_sign.sh` release guard → exit 3 without invoking the signer. Workspace-local JDK 17 and build-tools r34 were used only for checks and removed. | DONE (offline): A02, A04a, A05, A06, A07, A08, A09, B02, G02a. REVIEW (device/real-archive/integration evidence missing): A03 (not started), B01a, B01b, B03, B04a, B05, B07, C06, C07, C08a–c. PARTIAL bugs: R05, R07, R09, R18, R20, R23, R24–R28. Not performed: device/API 24–25 tests, APK install/upgrade, real signing, vendor login, real tar extraction, WebView device matrix, lifecycle (C01/C02), or any publication. |
 | Review/hardening pass / 2026-11-13 (`0f9250b`) | Exact-host HTTPS auth policy; per-flavor `/proc` cleanup scope; URL watcher no longer retains the Process or writes stdin; non-browser WebView schemes blocked; cleartext disabled outside loopback; write failures surfaced; archive comments preserved; NDK fail-closed helper staging with ELF/16 KB checks; tracked stale helper removed; CI builds only the development edition and publication stays refused. Added `ProcessScope`, `test_stage_assets.py`, align/package/host cases. Checks: host suite PASS 38 Python + 30 Java; build smoke PASS both flavors; `bash -n` clean; workflow YAML parses. | DONE (offline): A03 staging policy, A06, B03/B05/B07 hardening. PARTIAL: R01/R05/R17/R23 pending device/NDK/CI evidence. No device run, real NDK compile, signing, network, vendor login, or publication. |
-| B06 preparation slice / 2026-11-13 (uncommitted on `4168c62`) | Replaced `CliDownloader` with `CliInstallPolicy` + `CliInstallMetadata` + `CliInstaller`: explicit Install/Update only, ABI gate before network, exact manifest URL, approved artifact host, redirects refused, bounded manifest/download, streaming SHA-512, free-space preflight, unique staging, AArch64+linker ELF check, atomic publish, strict install record, one job, cancellation. `triggerDownload` refuses while a published session, stdin owner, or onboarding is live; the dashboard shows the installed version. Checks: `bash tests/run_host_tests.sh` → 38 Python + 37 Java PASS, exit 0; `01_gen_config.py` + `03_compile_java.sh` → 78 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, 100 classes, exit 0 (compile-only assets, no native/runtime proof). | REVIEW: live stop/restart integration is C02; no device install/upgrade, real vendor download, or interrupted/low-space device run. ELF check is metadata, not spawn/Bionic proof. No APK install, signing, or publication. |
+| B06 preparation slice / 2026-11-13 (`41cdd05`, pushed to `main`) | Replaced `CliDownloader` with `CliInstallPolicy` + `CliInstallMetadata` + `CliInstaller`: explicit Install/Update only, ABI gate before network, exact manifest URL, approved artifact host, redirects refused, bounded manifest/download, streaming SHA-512, free-space preflight, unique staging, AArch64+linker ELF check, atomic publish, strict install record, one job, cancellation. `triggerDownload` refuses while a published session, stdin owner, or onboarding is live; the dashboard shows the installed version. Checks: `bash tests/run_host_tests.sh` → 38 Python + 37 Java PASS, exit 0; `01_gen_config.py` + `03_compile_java.sh` → 78 classes, exit 0; `bash tests/run_build_smoke.sh` → PASS both flavors, 100 classes, exit 0 (compile-only assets, no native/runtime proof). | REVIEW: live stop/restart integration is C02; no device install/upgrade, real vendor download, or interrupted/low-space device run. ELF check is metadata, not spawn/Bionic proof. No APK install, signing, or publication. |
 
 The 2026-11-13 passes left the suite green: `bash tests/run_host_tests.sh` → 38
 Python + 37 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
