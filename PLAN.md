@@ -1,13 +1,14 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `75ff5cf` on `main` (plan record; code at
-  `9719035`, the F02/G01 share, permission and truthfulness pass with local
-  A03/A08 native evidence). Before those were `80c35d0` (share/permission/claims
-  plan record), `0606eb7`/`41cdd05` (B06 installer slice), `4168c62` (review/
-  hardening pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was
-  `d728f94` (`Initial version`). Always inspect current `HEAD`, working-tree
-  changes, and the latest instruction snapshot before work.
+- **Current integrated code revision:** `9719035` on `main` (F02/G01 share,
+  permission and truthfulness pass with local A03/A08 native evidence). Plan
+  records committed after it change no code, so this line is not re-dated by
+  documentation commits. Before it were `0606eb7`/`41cdd05` (B06 installer
+  slice), `4168c62` (review/hardening pass), `0f9250b`, and `33e2bd7`; the
+  original reviewed baseline was `d728f94` (`Initial version`). Always inspect
+  current `HEAD`, working-tree changes, and the latest instruction snapshot
+  before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -113,7 +114,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `75ff5cf` + AGENTS/PLAN snapshot; see git status | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `9719035` code + later plan records; see git status | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
