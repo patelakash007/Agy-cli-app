@@ -1,12 +1,13 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `9719035` on `main` (F02/G01 share,
-  permission and truthfulness pass plus local A03/A08 native evidence). Before
-  it were `0606eb7`/`41cdd05` (B06 installer slice), `4168c62` (review/hardening
-  pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was `d728f94`
-  (`Initial version`). Always inspect current `HEAD`, working-tree changes, and
-  the latest instruction snapshot before work.
+- **Current integrated revision:** `80c35d0` on `main` (plan record; code at
+  `9719035`, the F02/G01 share, permission and truthfulness pass with local
+  A03/A08 native evidence). Before those were `0606eb7`/`41cdd05` (B06 installer
+  slice), `4168c62` (review/hardening pass), `0f9250b`, and `33e2bd7`; the
+  original reviewed baseline was `d728f94` (`Initial version`). Always inspect
+  current `HEAD`, working-tree changes, and the latest instruction snapshot
+  before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -112,7 +113,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `9719035` + AGENTS/PLAN snapshot; clean worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `80c35d0` + AGENTS/PLAN snapshot; clean worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
@@ -149,8 +150,8 @@ The repository currently builds a small native Android **host** around the
 Antigravity CLI. It has:
 
 - A Java Android app with dashboard and hosted WebView surfaces.
-- A foreground service, process supervisor, downloader, basic state handling,
-  and log display.
+- A foreground service, process supervisor, basic state handling and log
+  display; CLI downloading is now the transactional installer below.
 - A native `agy-pty` helper and browser/open shims.
 - Direct selection of the vendor's Android ARM64 manifest rather than the
   upstream installer's unreliable `uname -o` logic.
@@ -158,6 +159,9 @@ Antigravity CLI. It has:
 - A transactional CLI installer preparation slice (B06): strict manifest/artifact
   policy, ABI gate, bounded staging, AArch64 ELF check, atomic publish and an
   install record; live session stop/restart and device evidence are pending.
+- A read-only share provider limited to `filesDir/share` with an offline
+  containment policy (F02/R34 mitigation), and no shared-storage or all-files
+  permissions (F02/R35).
 - A manual Gradle-free APK pipeline using `aapt`, Java compilation, D8, alignment,
   and `apksigner`.
 - An offline host-test entry point introduced by task A01.
@@ -279,7 +283,11 @@ scope is accepted. Closure is recorded here and in section 9, never by deletion.
 | R22 | Goal blocker | No real terminal, workspace/files/editor, package UI, or local agent screen exists. | D04, E01–E02, F01–F05 |
 | R23 | High | URL broadcast trust is weak on API 24–32; package targeting is not sender authentication. | B07 |
 
-### 3.1 Additional findings from the 2026-11-11 review
+### 3.1 Additional findings from the 2026-11-11 and later review passes
+
+R24–R32 came from the 2026-11-11 review. R33 (installer), R34 (share provider)
+and R35 (over-permission) were registered on 2026-11-13 and are kept in the same
+table so stable IDs are not renumbered.
 
 **R24–R32 status (2026-11-13):** R29–R32 are FIXED with persistent offline
 regressions; R24–R28 have bounded production fixes in the working tree but are
@@ -845,10 +853,10 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   at a time, cancellation API, and explicit Install/Update only (launch no
   longer downloads). `triggerDownload` refuses while a published session, a
   stdin owner, or onboarding is live. **Evidence:** B06 host cases in
-  `tests/java/HostTestRunner.java`; full suite 38 Python + 37 Java PASS;
-  `03_compile_java.sh` compiles 78 classes against `tools/android.jar`; full
-  `tests/run_build_smoke.sh` PASS for both flavors (100 classes, compile-only
-  assets).
+  `tests/java/HostTestRunner.java`; full suite PASS (38 Python + 37 Java at that
+  revision; 41 + 38 after the later F02 cases); `03_compile_java.sh` compiles 78
+  classes against `tools/android.jar`; full `tests/run_build_smoke.sh` PASS for
+  both flavors (100 classes, compile-only assets).
 - **Why still REVIEW:** live update stop/restart orchestration is C02; no device
   install/upgrade run, no real vendor download, no interrupted-download/
   low-space device test, and the ELF/linker check is metadata, not a spawn proof
