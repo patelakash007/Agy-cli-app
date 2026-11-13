@@ -1,13 +1,13 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `80c35d0` on `main` (plan record; code at
+- **Current integrated revision:** `75ff5cf` on `main` (plan record; code at
   `9719035`, the F02/G01 share, permission and truthfulness pass with local
-  A03/A08 native evidence). Before those were `0606eb7`/`41cdd05` (B06 installer
-  slice), `4168c62` (review/hardening pass), `0f9250b`, and `33e2bd7`; the
-  original reviewed baseline was `d728f94` (`Initial version`). Always inspect
-  current `HEAD`, working-tree changes, and the latest instruction snapshot
-  before work.
+  A03/A08 native evidence). Before those were `80c35d0` (share/permission/claims
+  plan record), `0606eb7`/`41cdd05` (B06 installer slice), `4168c62` (review/
+  hardening pass), `0f9250b`, and `33e2bd7`; the original reviewed baseline was
+  `d728f94` (`Initial version`). Always inspect current `HEAD`, working-tree
+  changes, and the latest instruction snapshot before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -113,7 +113,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `80c35d0` + AGENTS/PLAN snapshot; clean worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, B06 (preparation slice), C06, C07, C08a–c, F02 (share/permission mitigation), G01 (first pass), G02a | `75ff5cf` + AGENTS/PLAN snapshot; see git status | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; B06 live integration gated by C02; device acceptance batch is next |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
@@ -216,8 +216,8 @@ failures (A02/R16, A05/R19, B02/R04) are now regressions, not permanent reds:
 
 The Java suite needs a JDK on `PATH`; this VM has none preinstalled, so the
 2026-11-13 pass used a workspace-local Temurin JDK 17. The suite still does not
-cover the Android API, process races, consent, downloader/installers, device
-behaviour, or full tar security behavior.
+cover the Android API, process races, consent, installer network/staging
+integration, device behaviour, or full tar security behavior.
 
 Run the separate release/dev compile and package smoke check with:
 
@@ -226,8 +226,11 @@ bash tests/run_build_smoke.sh
 ```
 
 The review ran `bash tests/run_build_smoke.sh`: both flavors PASS, exit 0. It
-packages empty staging assets and used the system ZIP aligner on this host; it
-does not prove native-asset staging or the Python aligner's correctness.
+packages empty staging assets and used the system ZIP aligner on this host, so
+the smoke itself does not prove native-asset staging. A separate manual run with
+the NDK 27 helper did exercise the non-compile-only path and produced an APK
+containing the runtime marker, helper and CA bundle; A05's regressions cover the
+Python aligner.
 
 It must not install an APK, use credentials, download the CLI, invoke a live
 agent, sign a release, or modify checked-in source/config files. No device tests,
@@ -327,7 +330,8 @@ entry. Do not convert unverified suspicions into findings.
 ### 3.2 Status after the 2026-11-13 single-agent pass
 
 Statuses below describe work committed through the revisions named in section 9
-(latest `9719035`) unless a row states otherwise. “FIXED” means the named offline
+(latest code revision `9719035`; later plan-record commits change no status)
+unless a row states otherwise. “FIXED” means the named offline
 regression passes; “PARTIAL” means the code is present but a required
 device/integration check is still missing.
 
@@ -356,6 +360,12 @@ device/integration check is still missing.
 | R34 | PARTIAL | `SharePathPolicy` + hardened `AppFileProvider` expose only read-only regular files under `filesDir/share` via relative ids; absolute app paths, `.gemini`/CLI/prefix/log data, traversal, dot/empty segments, control characters, symlink escapes, directories and write modes are rejected. Offline R34 regression passes. Full F02 browser/editor and device grant tests remain. |
 | R35 | FIXED | All-files, legacy shared-storage, notification and battery-exemption permissions, `requestLegacyExternalStorage` and the launch all-files prompt were removed; static manifest regression plus share-provider tests pass. No device matrix run. |
 | R33 | PARTIAL | `CliInstallPolicy`/`CliInstallMetadata` + `CliInstaller` replace `CliDownloader`: ABI gate before network, exact manifest URL and approved HTTPS artifact host, redirects refused, bounded manifest and declared-size download, streaming SHA-512, conservative free-space check, unique cache staging, AArch64+linker ELF verification, unique sibling temp + same-directory atomic rename, strict install record, one job at a time, cancellation API, explicit Install/Update with no launch-time download. Offline regressions green; C02 live stop/restart integration, device install/upgrade and a real vendor download remain pending. |
+
+**Known offline-regression gaps:** B01a/B01b, B03, B04a, C06 and C08a–c are
+REVIEW partly because no dedicated offline regression exists yet, not only
+because device tests are outstanding. AGENTS.md §6.4 requires one per bug fix;
+adding these tests stays part of each card. Do not read REVIEW as “only the
+device check is missing.”
 
 ## 4. Owner decisions and external gates
 
@@ -456,7 +466,7 @@ Test paths marked “new” are allocations to create, not files claimed to exis
 
 | Worker | Task / bug | Exclusive production writes | Exclusive tests / entry point | Why independent now |
 |---|---|---|---|---|
-| AI-1 | B01a / R07 | `app/src/main/java/com/agy/core/OpenUrlWatcher.java`, `app/src/main/java/com/agy/runtime/OnboardingSeeder.java`, `app/src/main/java/com/agy/ui/MainActivity.java` | New `tests/java/b01a/` and `tests/run_b01a_tests.sh` | Removes unsolicited input/defaults without inventing the future terminal or state model. |
+| AI-1 | B01a / R07 | `app/src/main/java/com/agy/core/OpenUrlWatcher.java`, `app/src/main/java/com/agy/ui/MainActivity.java` (do not recreate the deleted `OnboardingSeeder`) | New `tests/java/b01a/` and `tests/run_b01a_tests.sh` | Removes unsolicited input/defaults without inventing the future terminal or state model. |
 | AI-2 | A02 / R16 | `modules/builder/01_gen_config.py`, `modules/builder/build_apk.sh`, `modules/builder/04_dex.sh` if needed | `tests/python/test_gen_config.py`, `tests/run_build_smoke.sh` | SDK/config propagation is independent of runtime consent, tar, and ZIP payload handling. |
 | AI-3 | A05 / R19 | `modules/builder/align.py` | `tests/python/test_align.py` | ZIP transformation has its own fixtures and no runtime interface changes. |
 | AI-4 | B05 / R09 | `app/src/main/java/com/agy/install/TarExtractor.java`, `TarHeader.java`, `TarPath.java` in that same directory; a small dedicated policy class there if needed | New `tests/java/b05/` and `tests/run_b05_tests.sh` | Archive policy can be tested offline before transactional installer integration. |
@@ -582,7 +592,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   malformed numeric/control-character input must fail clearly; both flavors must
   compile without modifying checked-in generated files.
 
-#### A03 — Reproducible fail-closed native host build — REVIEW (real NDK/CI build pending)
+#### A03 — Reproducible fail-closed native host build — REVIEW (CI provenance and device execution pending)
 
 - **Depends on:** A02.
 - **Starting files:** `modules/builder/05_stage_assets.py`,
@@ -671,7 +681,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - **Conflict:** A02 may own `04_dex.sh`/orchestrator; A08/A09 own package-stage
   changes. Serialize this packaging lane or assign one shared writer.
 
-#### A08 — Asset-inclusive packaging validation — DONE (offline, native gate A03 pending)
+#### A08 — Asset-inclusive packaging validation — DONE (offline; native gate locally exercised, A03 CI/device pending)
 
 - **Implementation prerequisite:** A01; **native-asset acceptance gate:** A03.
   Fixture-only input/inventory policy can be implemented before the native gate.
@@ -720,8 +730,9 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 
 - **Depends on:** A01. **Bug:** the input/defaults part of R07.
 - **Writes:** `app/src/main/java/com/agy/core/OpenUrlWatcher.java`,
-  `app/src/main/java/com/agy/runtime/OnboardingSeeder.java`,
   `app/src/main/java/com/agy/ui/MainActivity.java`; dedicated B01a tests/runner.
+  `OnboardingSeeder` was deleted by this fix and must not be recreated. No
+  dedicated offline B01a regression exists yet (§6.4 gap).
 - Remove output-triggered login/color/TOS keystrokes, backup threads, and the
   dashboard's synthetic Tab-Tab-Enter “finish setup” shortcut. Do not replace them
   with another automatic acceptance path. Fresh defaults must not enable
@@ -737,10 +748,11 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 ##### B01b — Preserve vendor state and show honest setup requirements — REVIEW
 
 - **Depends on:** B01a. **Bug:** the fabricated/overwritten state part of R07.
-- **Starting files:** `app/src/main/java/com/agy/runtime/OnboardingSeeder.java`,
-  `CoreInstaller.java` in that directory, `app/src/main/java/com/agy/ui/MainActivity.java`,
-  `modules/core/seed/`. Allocate a bounded slice; inspect asset references before
-  removing anything. No new Markdown files or user-project instruction injection.
+- **Starting files:** `app/src/main/java/com/agy/runtime/CoreInstaller.java`,
+  `app/src/main/java/com/agy/ui/MainActivity.java`, `modules/core/seed/`. The
+  former `OnboardingSeeder` was deleted by B01a; do not recreate it. Allocate a
+  bounded slice; inspect asset references before removing anything. No new
+  Markdown files or user-project instruction injection.
 - Stop seeding completed onboarding/fixed vendor installation records/guessed
   project entries. Preserve all nonempty user state, including incomplete wizard
   state. Offer visible review for existing unsafe settings, not silent migration.
@@ -983,7 +995,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - **Depends on:** A01. **Bug:** R25. Independent offline fix, not blocked on tools.
 - **Writes:** `app/src/main/java/com/agy/util/AtomicFileWriter.java`; dedicated
   barrier/failure-injection tests. Allocate affected caller error handling only
-  if the API changes; `NetworkConfigWriter`/`OnboardingSeeder` are shared callers.
+  if the API changes; `NetworkConfigWriter` is a shared caller.
 - Use writer-owned unique sibling temporaries, checked publication, safe cleanup,
   and explicit failure reporting. Never delete a good target because rename failed
   or fall back to an unsafe in-place write while calling it atomic. Keep UTF-8,
