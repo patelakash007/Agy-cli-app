@@ -1,10 +1,7 @@
 package com.agy.core;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -29,8 +26,9 @@ public final class OpenUrlWatcher {
 
     private static final String TAG = "OpenUrlWatcher";
 
+    /** Candidate extraction only; CoreRuntimeState.isValidSessionUrl owns the policy. */
     private static final Pattern SESSION_URL_PATTERN =
-            Pattern.compile("https?://[a-zA-Z0-9\\-\\.]+(?::\\d+)?/r/[a-zA-Z0-9\\-_/]+(?:[?#][a-zA-Z0-9\\-_\\.~%&=/#+]*)?");
+            Pattern.compile("https://[^\\s\"'<>\\\\]+", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern AUTH_URL_PATTERN =
             Pattern.compile("https?://[\\w\\-\\.\\~:\\?\\#\\[\\]\\@\\!\\$\\&\\'\\(\\)\\*\\+,;=%/]+");
@@ -51,7 +49,6 @@ public final class OpenUrlWatcher {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private volatile Process supervisedProcess;
-    private volatile long lastAutoSelectTime = 0;
     private volatile String lastDispatchedAuthUrl = "";
     private volatile long lastDispatchedAuthTime = 0;
     private volatile String lastDispatchedSessionUrl = "";
@@ -61,48 +58,24 @@ public final class OpenUrlWatcher {
     private final StringBuilder multilineAuthBuffer = new StringBuilder();
     private boolean isBufferingAuthUrl = false;
 
-    private final BroadcastReceiver openUrlReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null) return;
-            String url = intent.getStringExtra("url");
-            if (url != null && !url.trim().isEmpty()) {
-                Log.i(TAG, "broadcast ACTION_OPEN_URL received: "
-                        + SensitiveDataRedactor.safeUrl(url));
-                dispatchUrl(url);
-            }
-        }
-    };
-
     public OpenUrlWatcher(Context context) {
         this.appContext = context.getApplicationContext();
     }
 
     public void setProcess(Process process) {
         this.supervisedProcess = process;
-        this.colorSchemeAdvanced = false;
-        this.tosAdvanced = false;
     }
 
+    /**
+     * URL delivery is owned by the supervised process's own stdout stream. The
+     * public ACTION_OPEN_URL broadcast input was removed (B07/R23): another app,
+     * the other flavor, or a spoofed sender cannot drive URL/auth/state.
+     */
     public void start() {
-        try {
-            IntentFilter filter = new IntentFilter("com.agy.ACTION_OPEN_URL");
-            if (Build.VERSION.SDK_INT >= 33) {
-                appContext.registerReceiver(openUrlReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                appContext.registerReceiver(openUrlReceiver, filter);
-            }
-            Log.i(TAG, "registered ACTION_OPEN_URL receiver");
-        } catch (Throwable t) {
-            Log.w(TAG, "failed to register ACTION_OPEN_URL receiver: " + t.getMessage());
-        }
+        Log.i(TAG, "URL discovery uses owned CLI output only; no broadcast receiver");
     }
 
     public void stop() {
-        try {
-            appContext.unregisterReceiver(openUrlReceiver);
-        } catch (Throwable ignored) {
-        }
         supervisedProcess = null;
     }
 
@@ -119,23 +92,19 @@ public final class OpenUrlWatcher {
             line = rawLine;
         }
 
-        // 1. Detect interactive login prompt and auto-select Option 1 (Google OAuth)
-        if (line.contains("Select login method:") || line.contains("1. Google OAuth")
-                || rawLine.contains("Select login method:") || rawLine.contains("1. Google OAuth")) {
-            autoSelectGoogleOAuth();
-        }
-
-        // 1b. Detect authorization code prompt
+        // 1. CLI output may only *describe* state. It never writes stdin: login
+        // selection, terms acceptance and workspace trust are the user's own
+        // visible actions (B01a/R07).
         if (line.contains("paste the authorization code") || line.contains("authorization code...")) {
             CoreRuntimeState.authPending = true;
         }
 
-        // 1c. Detect interactive onboarding prompts (Color scheme / Terms of Service) and auto-advance
         if (line.contains("Choose your color scheme") || line.contains("[Next]")
                 || line.contains("Terms of Service") || line.contains("[Done]")
                 || rawLine.contains("Choose your color scheme") || rawLine.contains("[Next]")
                 || rawLine.contains("Terms of Service") || rawLine.contains("[Done]")) {
-            handleOnboardingPrompt(rawLine + " " + line);
+            CoreRuntimeState.onboardingPending = true;
+            Log.i(TAG, "CLI is waiting for interactive setup; user input is required");
         }
 
         // 2. Detect authenticated email from CLI banner
@@ -200,13 +169,10 @@ public final class OpenUrlWatcher {
 
         // 5. Detect Remote Control session URL (/r/<session-id>)
         if (line.contains("/r/")) {
-            Matcher sm = SESSION_URL_PATTERN.matcher(line);
-            if (sm.find()) {
-                String sessionUrl = sm.group();
-                if (CoreRuntimeState.isValidSessionUrl(sessionUrl)) {
-                    handleSessionUrl(sessionUrl);
-                    return;
-                }
+            String sessionUrl = firstValidSessionUrl(line);
+            if (sessionUrl != null) {
+                handleSessionUrl(sessionUrl);
+                return;
             }
         }
 
@@ -223,67 +189,21 @@ public final class OpenUrlWatcher {
         }
     }
 
-    private void autoSelectGoogleOAuth() {
-        long now = System.currentTimeMillis();
-        if (now - lastAutoSelectTime < 3000) {
-            return;
-        }
-        lastAutoSelectTime = now;
-        Process proc = supervisedProcess;
-        if (proc != null) {
-            try {
-                OutputStream os = proc.getOutputStream();
-                if (os != null) {
-                    os.write("\r\n".getBytes(StandardCharsets.UTF_8));
-                    os.flush();
-                    Log.i(TAG, "Sent Enter to CLI stdin to select 1. Google OAuth");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed sending Enter to CLI stdin: " + e.getMessage());
+    /** Extracts candidate URLs from child text and returns the first trusted one. */
+    private static String firstValidSessionUrl(String line) {
+        Matcher matcher = SESSION_URL_PATTERN.matcher(line);
+        while (matcher.find()) {
+            String candidate = matcher.group();
+            // Trim trailing punctuation that commonly follows a pasted URL.
+            while (candidate.length() > 0
+                    && ".,;:)!]}>\"'".indexOf(candidate.charAt(candidate.length() - 1)) >= 0) {
+                candidate = candidate.substring(0, candidate.length() - 1);
+            }
+            if (CoreRuntimeState.isValidSessionUrl(candidate)) {
+                return candidate;
             }
         }
-    }
-
-    private volatile boolean colorSchemeAdvanced = false;
-    private volatile boolean tosAdvanced = false;
-
-    private void handleOnboardingPrompt(String text) {
-        CoreRuntimeState.onboardingPending = true;
-        if ((text.contains("Choose your color scheme") || text.contains("[Next]")) && !colorSchemeAdvanced) {
-            colorSchemeAdvanced = true;
-            sendEnterToCli("color scheme [Next]");
-        }
-        if ((text.contains("Terms of Service") || text.contains("[Done]")) && !tosAdvanced) {
-            tosAdvanced = true;
-            advanceTosDialog();
-        }
-    }
-
-    private void advanceTosDialog() {
-        new Thread(() -> {
-            try {
-                // Focus: 0=checkbox, 1=[Previous], 2=[Done]
-                // Send Tab (moves to 1), Tab (moves to 2), Enter (confirms [Done])
-                sendRawBytes("\t", "TOS Tab 1");
-                Thread.sleep(120);
-                sendRawBytes("\t", "TOS Tab 2");
-                Thread.sleep(120);
-                sendRawBytes("\r\n", "TOS Enter [Done]");
-                Log.i(TAG, "Completed Tab-Tab-Enter sequence for [Done]");
-
-                // Backup follow-up after 1000ms if session URL hasn't arrived
-                Thread.sleep(1000);
-                if (CoreRuntimeState.serverUrl == null) {
-                    sendRawBytes("\t", "TOS backup Tab 1");
-                    Thread.sleep(120);
-                    sendRawBytes("\t", "TOS backup Tab 2");
-                    Thread.sleep(120);
-                    sendRawBytes("\r\n", "TOS backup Enter");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "advanceTosDialog error: " + e.getMessage());
-            }
-        }).start();
+        return null;
     }
 
     private void sendRawBytes(String data, String reason) {

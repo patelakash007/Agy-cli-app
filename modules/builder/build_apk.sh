@@ -68,17 +68,29 @@ if [ -n "$CUSTOM_OUT" ]; then
 elif [ "$DEV_MODE" = "1" ]; then
     OUT_APK="$DIST_DIR/${BASE_PREFIX}-dev.apk"
     EDITION_LABEL="DEV EDITION (com.agy.dev, debuggable)"
+    EDITION_FLAVOR="dev"
 else
     OUT_APK="$DIST_DIR/${BASE_PREFIX}.apk"
     EDITION_LABEL="RELEASE EDITION (com.agy, native bionic)"
+    EDITION_FLAVOR="release"
 fi
+
+# D8 must target the configured minimum API, not a hardcoded literal (A02/R16).
+MIN_API="$(sed -n 's/^MIN_API=//p' "$PROJECT_ROOT/config/app.env" | tr -d '"' | tr -d "'" | head -1)"
+MIN_API="${MIN_API:-24}"
+case "$MIN_API" in
+    ''|*[!0-9]*)
+        echo "[ERROR] MIN_API in config/app.env is not a decimal integer: $MIN_API" >&2
+        exit 1
+        ;;
+esac
 
 
 echo "============================================================"
 echo "  ANTIGRAVITY v1.0.0 APK BUILD PIPELINE"
 echo "  $EDITION_LABEL"
 if [ "$FAST_BUILD" = "1" ]; then
-    echo "  [MODE: FAST ITERATION (UNCOMPRESSED ASSETS & CACHE)]"
+    echo "  [MODE: FAST ITERATION (RUNTIME ASSETS STORED UNCOMPRESSED; NO BUILD CACHE)]"
 fi
 echo "============================================================"
 
@@ -112,7 +124,7 @@ bash "$SCRIPT_DIR/03_compile_java.sh" "$BUILD_DIR/obj" "$BUILD_DIR/gen" "$APP_DI
 
 # Phase 04: D8 Dexing
 echo -e "\n>>> [4/8] Converting Bytecode to classes.dex (D8)..."
-bash "$SCRIPT_DIR/04_dex.sh" "$BUILD_DIR/dex" "$BUILD_DIR/obj" "$TOOLS_DIR/r8.jar" "$TOOLS_DIR/android.jar" 24
+bash "$SCRIPT_DIR/04_dex.sh" "$BUILD_DIR/dex" "$BUILD_DIR/obj" "$TOOLS_DIR/r8.jar" "$TOOLS_DIR/android.jar" "$MIN_API"
 
 # Phase 05: Stage Assets
 echo -e "\n>>> [5/8] Staging Runtime and Web Assets..."
@@ -126,7 +138,7 @@ python3 "$SCRIPT_DIR/05_stage_assets.py" "$BUILD_DIR/staging" "${STAGE_FLAGS[@]}
 
 # Phase 06: Package Unaligned APK
 echo -e "\n>>> [6/8] Packaging Unaligned APK..."
-bash "$SCRIPT_DIR/06_package.sh" "$BUILD_DIR/unaligned.apk" "$TARGET_MANIFEST" "$APP_DIR/src/main/res" "$TOOLS_DIR/android.jar" "$BUILD_DIR/staging/assets" "$BUILD_DIR/dex/classes.dex" "$BUILD_DIR/res"
+bash "$SCRIPT_DIR/06_package.sh" "$BUILD_DIR/unaligned.apk" "$TARGET_MANIFEST" "$APP_DIR/src/main/res" "$TOOLS_DIR/android.jar" "$BUILD_DIR/staging/assets" "$BUILD_DIR/dex" "$BUILD_DIR/res"
 
 # Phase 07: ZipAlign
 echo -e "\n>>> [7/8] ZipAligning APK..."
@@ -134,8 +146,8 @@ python3 "$SCRIPT_DIR/align.py" "$BUILD_DIR/unaligned.apk" "$BUILD_DIR/aligned.ap
 
 # Phase 08: Sign and Verify APK
 echo -e "\n>>> [8/8] Signing and Verifying APK..."
-bash "$SCRIPT_DIR/08_sign.sh" "$BUILD_DIR/aligned.apk" "$OUT_APK" "$TOOLS_DIR/debug.keystore"
-bash "$SCRIPT_DIR/09_verify.sh" "$OUT_APK"
+bash "$SCRIPT_DIR/08_sign.sh" "$BUILD_DIR/aligned.apk" "$OUT_APK" "$EDITION_FLAVOR"
+bash "$SCRIPT_DIR/09_verify.sh" "$OUT_APK" "$EDITION_FLAVOR"
 
 echo "============================================================"
 echo "  BUILD SUCCESSFUL! APK CREATED:"

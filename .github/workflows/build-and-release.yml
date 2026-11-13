@@ -1,32 +1,38 @@
 name: Build and Release Antigravity APKs
 
+# G02a/R20: nothing in this workflow publishes automatically. Push/tag/manual
+# runs produce clearly-labelled development artifacts only; a public release
+# requires an explicit manual confirmation plus the owner's release gates P1-P4.
 on:
   push:
-    tags:
-      - 'v*'
     branches:
       - dev
       - main
   workflow_dispatch:
     inputs:
+      publish_release:
+        description: 'Type PUBLISH to create a public GitHub release (any other value only builds)'
+        required: true
+        default: 'no'
       tag_name:
         description: 'Release Tag (e.g. v1.0.0)'
         required: false
-        default: 'v1.0.0'
+        default: ''
       draft:
         description: 'Create Draft Release'
         type: boolean
-        default: false
+        default: true
       prerelease:
         description: 'Mark as Pre-release'
         type: boolean
-        default: false
+        default: true
       vendor_url:
         description: 'Optional direct URL to download vendor inputs archive (core, certs, seed, shims)'
         required: false
 
+# Least privilege for the build lane; the release job requests write access itself.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -106,24 +112,50 @@ jobs:
           sha256sum antigravity.apk antigravity-dev.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Upload Build Artifacts
+      - name: Upload Development Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: antigravity-binaries
+          name: antigravity-development-binaries
           path: |
             dist/antigravity.apk
             dist/antigravity-dev.apk
             dist/SHA256SUMS.txt
 
+  release:
+    name: Publish approved release
+    needs: build
+    # Publication requires an explicit confirmation, a tag and the protected
+    # release environment (owner approval). Tags alone never publish (G02a).
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish_release == 'PUBLISH' &&
+      inputs.tag_name != ''
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download Development Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: antigravity-development-binaries
+          path: dist
+
+      - name: Refuse unpublished release gates
+        run: |
+          echo "[G02a] Release publication is blocked until P1-P4 and device evidence are approved."
+          echo "[G02a] No automatic publication is performed by this workflow."
+          exit 1
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: false
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          name: ${{ format('Antigravity for Android {0}', github.event.inputs.tag_name || github.ref_name) }}
-          draft: ${{ github.event.inputs.draft || false }}
-          prerelease: ${{ github.event.inputs.prerelease || false }}
-          make_latest: true
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ format('Antigravity for Android {0}', inputs.tag_name) }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          make_latest: false
           files: |
             dist/antigravity.apk
             dist/antigravity-dev.apk

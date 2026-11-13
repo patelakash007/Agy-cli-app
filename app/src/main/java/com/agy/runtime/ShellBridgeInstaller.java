@@ -3,8 +3,10 @@ package com.agy.runtime;
 import android.util.Log;
 
 import com.agy.install.EnvPaths;
+import com.agy.util.Sha256;
 import com.agy.util.ShellQuote;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -66,29 +68,115 @@ public final class ShellBridgeInstaller {
         }
     }
 
+    /** CMake builds of the helper are far smaller than this defensive bound. */
+    private static final int MAX_HELPER_BYTES = 32 * 1024 * 1024;
+
+    /**
+     * Installs the bundled PTY helper by content identity (C08a/R26). Size and
+     * the executable bit are not identity: an APK upgrade that changes the
+     * helper must deliver the new bytes, an unchanged asset is left alone, and a
+     * failed/interrupted publish keeps the previous working helper.
+     */
     private static void installPtyHelper(File bin, android.content.Context context) {
         if (context == null || bin == null) return;
         File target = new File(bin, "agy-pty");
-        if (target.isFile() && target.canExecute() && target.length() > 1000) {
-            return;
-        }
-        try (InputStream in = context.getAssets().open("runtime/bin/agy-pty");
-             FileOutputStream out = new FileOutputStream(target)) {
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                out.write(buf, 0, n);
-            }
-            out.flush();
-            target.setReadable(true, false);
-            target.setExecutable(true, false);
-            try {
-                android.system.Os.chmod(target.getAbsolutePath(), 0755);
-            } catch (Throwable ignored) {
-            }
-            Log.i(TAG, "Extracted native agy-pty helper to " + target.getAbsolutePath());
+        byte[] bundled;
+        try (InputStream in = context.getAssets().open("runtime/bin/agy-pty")) {
+            bundled = readBounded(in, MAX_HELPER_BYTES);
         } catch (Throwable t) {
             Log.w(TAG, "Native agy-pty asset not available: " + t.getMessage());
+            return;
+        }
+        if (!isAarch64Elf(bundled)) {
+            Log.w(TAG, "Bundled agy-pty asset is not an AArch64 ELF; keeping existing helper");
+            return;
+        }
+        if (sameContent(target, bundled)) {
+            ensureExecutable(target);
+            return;
+        }
+        if (publishExecutable(target, bundled)) {
+            Log.i(TAG, "Published native agy-pty helper to " + target.getAbsolutePath());
+        } else {
+            Log.w(TAG, "Failed to publish agy-pty helper; keeping the existing one at " + target);
+        }
+    }
+
+    private static boolean isAarch64Elf(byte[] data) {
+        return data.length >= 20
+                && (data[0] & 0xFF) == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F'
+                && data[4] == 2 // ELFCLASS64
+                && (data[18] & 0xFF) == 0xB7 && (data[19] & 0xFF) == 0x00; // EM_AARCH64
+    }
+
+    private static byte[] readBounded(InputStream in, int maxBytes) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            if (out.size() + read > maxBytes) {
+                throw new IOException("asset exceeds " + maxBytes + " bytes");
+            }
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
+    }
+
+    private static boolean sameContent(File file, byte[] data) {
+        if (!file.isFile() || file.length() != data.length) {
+            return false;
+        }
+        try {
+            return Sha256.of(file).equals(Sha256.of(data));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void ensureExecutable(File file) {
+        file.setReadable(true, false);
+        if (!file.setExecutable(true, false)) {
+            Log.w(TAG, "setExecutable failed: " + file);
+        }
+        try {
+            android.system.Os.chmod(file.getAbsolutePath(), 0755);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Stages a complete sibling, sets its mode, verifies the staged bytes, then
+     * renames it over the target. The old file is never truncated in place.
+     */
+    private static boolean publishExecutable(File target, byte[] data) {
+        File dir = target.getParentFile();
+        if (dir == null || (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory())) {
+            return false;
+        }
+        File tmp = null;
+        try {
+            tmp = File.createTempFile(target.getName() + ".", ".tmp", dir);
+            try (FileOutputStream out = new FileOutputStream(tmp)) {
+                out.write(data);
+                out.flush();
+                out.getFD().sync();
+            }
+            if (!sameContent(tmp, data)) {
+                return false;
+            }
+            ensureExecutable(tmp);
+            if (!tmp.renameTo(target)) {
+                return false;
+            }
+            tmp = null;
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "cannot publish executable " + target + ": " + e.getMessage());
+            return false;
+        } finally {
+            if (tmp != null) {
+                com.agy.util.IoUtil.deleteQuietly(tmp);
+            }
         }
     }
 
@@ -209,8 +297,6 @@ public final class ShellBridgeInstaller {
      * reader and sends one signature-protected internal broadcast as a shell-side fallback.
      */
     private static void writeOpenUrlShim(File bridge, android.content.Context context) {
-        String pkg = (context != null) ? context.getPackageName() : "com.agy";
-
         StringBuilder sb = new StringBuilder();
         sb.append("#!/system/bin/sh\n");
         sb.append("# AGY URL opener shim (xdg-open / open / sensible-browser).\n");
@@ -219,11 +305,10 @@ public final class ShellBridgeInstaller {
         sb.append("URL=\"$1\"\n");
         sb.append("[ -z \"$URL\" ] && URL=\"$2\"\n");
         sb.append("[ -z \"$URL\" ] && exit 0\n");
+        // Marker on owned stdout only. The former public broadcast fallback was
+        // removed so a foreign app cannot inject URLs (B07/R23).
         sb.append("echo \"AGY_OPEN_URL=$URL\"\n");
         sb.append("echo \"ANTIGRAVITY_OPEN_URL: $URL\"\n");
-        sb.append("if [ -x /system/bin/am ]; then\n");
-        sb.append("  /system/bin/am broadcast -a com.agy.ACTION_OPEN_URL -p ").append(pkg).append(" --es url \"$URL\" >/dev/null 2>&1 || true\n");
-        sb.append("fi\n");
         sb.append("exit 0\n");
         writeScript(bridge, sb.toString());
     }
@@ -264,18 +349,19 @@ public final class ShellBridgeInstaller {
         writeScript(bridge, sb.toString());
     }
 
+    /**
+     * Publishes a complete executable script atomically (C08c/R28): identical
+     * content is left untouched so warm starts never truncate a live shim, and
+     * a failed write preserves the previous executable.
+     */
     private static void writeScript(File bridge, String script) {
-        try (OutputStream out = new FileOutputStream(bridge)) {
-            out.write(script.getBytes(Charset.forName("UTF-8")));
-        } catch (IOException e) {
-            Log.w(TAG, "cannot write bridge " + bridge + ": " + e.getMessage());
+        byte[] data = script.getBytes(Charset.forName("UTF-8"));
+        if (sameContent(bridge, data)) {
+            ensureExecutable(bridge);
             return;
         }
-        bridge.setReadable(true, false);
-        bridge.setExecutable(true, false);
-        try {
-            android.system.Os.chmod(bridge.getAbsolutePath(), 0755);
-        } catch (Throwable ignored) {
+        if (!publishExecutable(bridge, data)) {
+            Log.w(TAG, "cannot publish bridge " + bridge + "; keeping the previous file");
         }
     }
 }

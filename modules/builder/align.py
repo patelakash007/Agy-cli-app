@@ -1,19 +1,43 @@
 #!/usr/bin/env python3
 """
 align.py - 4-byte APK ZipAlign utility.
-Uses system zipalign if available; otherwise falls back to pure Python 4-byte ZIP alignment.
+
+Uses system zipalign if available; otherwise falls back to a pure-Python ZIP
+rewriter. The rewriter treats the central directory as authoritative: local
+headers are rebuilt with the real CRC/sizes and without data-descriptor flag
+bit 3, so archives produced by streaming writers stay valid after alignment.
+Unsupported inputs (ZIP64, encryption, multi-disk, unknown compression) are
+rejected instead of being copied into a corrupt "successful" output.
 """
-import sys
 import os
 import shutil
 import struct
 import subprocess
+import sys
 import zipfile
+
+_LOCAL_HEADER = struct.Struct("<IHHHHHIIIHH")
+_CENTRAL_HEADER = struct.Struct("<IHHHHHHIIIHHHHHII")
+_EOCD = struct.Struct("<IHHHHIIH")
+
+_LOCAL_SIG = 0x04034B50
+_CENTRAL_SIG = 0x02014B50
+_EOCD_SIG = 0x06054B50
+_FLAG_DATA_DESCRIPTOR = 0x0008
+_FLAG_ENCRYPTED = 0x0001
+_PADDING_IDS = (0xD5D9, 0xD935)
+_MAX_UINT32 = 0xFFFFFFFF
+_SUPPORTED_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+
+
+class UnsupportedArchiveError(ValueError):
+    """A ZIP feature this aligner must not silently rewrite."""
 
 
 def align_with_binary(in_apk, out_apk, alignment=4):
     if shutil.which("zipalign"):
-        res = subprocess.run(["zipalign", "-f", "-p", str(alignment), in_apk, out_apk], capture_output=True)
+        res = subprocess.run(["zipalign", "-f", "-p", str(alignment), in_apk, out_apk],
+                             capture_output=True)
         return res.returncode == 0
     return False
 
@@ -25,89 +49,134 @@ def dostime(dt):
     return dostime_val, dosdate
 
 
+def _strip_padding_extra(extra):
+    """Preserve unknown extras, drop any previous zipalign padding."""
+    out = bytearray()
+    i = 0
+    while i < len(extra):
+        if i + 4 > len(extra):
+            raise UnsupportedArchiveError("truncated local extra field")
+        header_id, size = struct.unpack("<HH", extra[i:i + 4])
+        end = i + 4 + size
+        if end > len(extra):
+            raise UnsupportedArchiveError("truncated local extra field")
+        if header_id not in _PADDING_IDS:
+            out += extra[i:end]
+        i = end
+    return bytes(out)
+
+
+def _padding_for(offset, name_len, extra_len, alignment):
+    current = offset + _LOCAL_HEADER.size + name_len + extra_len
+    remainder = current % alignment
+    if remainder == 0:
+        return b""
+    pad_len = alignment - remainder
+    while pad_len < 4:
+        pad_len += alignment
+    return struct.pack("<HH", 0xD5D9, pad_len - 4) + (b"\x00" * (pad_len - 4))
+
+
 def align_with_python(in_apk, out_apk, alignment=4):
-    """
-    Pure Python 4-byte zip alignment according to Android ZIP alignment specification.
-    Uncompressed entries (method == 0) are padded so their data starts on a multiple of alignment.
-    Raw payload bytes are copied directly without decompressing, ensuring data integrity.
-    """
-    with zipfile.ZipFile(in_apk, "r") as zin, open(in_apk, "rb") as fin, open(out_apk, "wb") as fout:
-        central_dirs = []
+    """Align uncompressed entry payloads while preserving bytes, CRCs and extras."""
+    if alignment <= 0 or (alignment & (alignment - 1)) != 0:
+        raise ValueError("alignment must be a positive power of two: %r" % (alignment,))
 
-        for info in zin.infolist():
-            # Seek to local file header
+    total_size = os.path.getsize(in_apk)
+    with zipfile.ZipFile(in_apk, "r") as zin, open(in_apk, "rb") as fin, \
+            open(out_apk, "wb") as fout:
+        infos = zin.infolist()
+        if not infos:
+            raise UnsupportedArchiveError("archive has no entries")
+        if len(infos) > 0xFFFE:
+            raise UnsupportedArchiveError("too many entries for a non-ZIP64 archive")
+
+        central = []
+        for info in infos:
+            if info.flag_bits & _FLAG_ENCRYPTED:
+                raise UnsupportedArchiveError("encrypted entry %r" % info.filename)
+            if info.compress_type not in _SUPPORTED_METHODS:
+                raise UnsupportedArchiveError(
+                    "unsupported compression method %d for %r"
+                    % (info.compress_type, info.filename))
+            if (_MAX_UINT32 in (info.file_size, info.compress_size, info.header_offset)):
+                raise UnsupportedArchiveError("ZIP64 entry %r is unsupported" % info.filename)
+
             fin.seek(info.header_offset)
-            hdr = fin.read(30)
-            if len(hdr) < 30:
-                raise ValueError(f"Corrupt local header at offset {info.header_offset}")
-            sig, ver, flag, method, time, date, crc, csize, usize, nlen, elen = struct.unpack("<IHHHHHIIIHH", hdr)
+            header = fin.read(_LOCAL_HEADER.size)
+            if len(header) < _LOCAL_HEADER.size:
+                raise UnsupportedArchiveError("truncated local header at %d" % info.header_offset)
+            (sig, _ver, _flag, method, _time, _date, _crc, local_csize,
+             local_usize, name_len, extra_len) = _LOCAL_HEADER.unpack(header)
+            if sig != _LOCAL_SIG:
+                raise UnsupportedArchiveError(
+                    "bad local header signature at %d" % info.header_offset)
+            if method != info.compress_type:
+                raise UnsupportedArchiveError(
+                    "local/central compression mismatch for %r" % info.filename)
+            # A streaming writer leaves zeros here and appends a data descriptor;
+            # anything else must agree with the authoritative central directory.
+            if local_csize not in (0, info.compress_size):
+                raise UnsupportedArchiveError(
+                    "local compressed size disagrees for %r" % info.filename)
+            if local_usize not in (0, info.file_size):
+                raise UnsupportedArchiveError(
+                    "local uncompressed size disagrees for %r" % info.filename)
 
-            # Seek to start of raw payload
-            fin.seek(info.header_offset + 30 + nlen + elen)
+            data_offset = info.header_offset + _LOCAL_HEADER.size + name_len + extra_len
+            data_end = data_offset + info.compress_size
+            if data_offset > total_size or data_end > total_size:
+                raise UnsupportedArchiveError("entry %r runs past end of archive" % info.filename)
 
-            # Android SO alignment: 4096 bytes for .so, 4 bytes for others
-            entry_align = 4096 if (info.filename.endswith(".so") and info.compress_type == 0) else alignment
-
-            local_header_offset = fout.tell()
             filename_bytes = info.filename.encode("utf-8")
-            extra = bytearray(info.extra or b"")
+            extra = bytearray(_strip_padding_extra(info.extra or b""))
+            flags = info.flag_bits & ~_FLAG_DATA_DESCRIPTOR
+            entry_align = 4096 if (info.filename.endswith(".so")
+                                   and info.compress_type == zipfile.ZIP_STORED) else alignment
+            local_header_offset = fout.tell()
+            if info.compress_type == zipfile.ZIP_STORED:
+                extra += _padding_for(local_header_offset, len(filename_bytes), len(extra),
+                                      entry_align)
+            if len(extra) > 0xFFFF:
+                raise UnsupportedArchiveError("extra field too large for %r" % info.filename)
 
-            if info.compress_type == 0:
-                # Calculate where data would start: offset + fixed_header(30) + filename_len + extra_len
-                current_data_pos = local_header_offset + 30 + len(filename_bytes) + len(extra)
-                rem = current_data_pos % entry_align
-                if rem != 0:
-                    pad_len = entry_align - rem
-                    if pad_len < 4:
-                        pad_len += entry_align
-                    # Android 0xd9d5 alignment header
-                    pad_data = b"\xd5\xd9" + struct.pack("<H", pad_len - 4) + (b"\x00" * (pad_len - 4))
-                    extra.extend(pad_data)
-
-            mtime, mdate = dostime(info.date_time)
-
-            # Write Local File Header
-            header = struct.pack(
-                "<IHHHHHIIIHH",
-                0x04034b50,                 # Local header signature
-                info.extract_version,        # Version needed
-                info.flag_bits,              # General purpose bit flag
-                info.compress_type,          # Compression method
-                mtime,                       # Mod time
-                mdate,                       # Mod date
-                info.CRC,                    # CRC-32
-                info.compress_size,          # Compressed size
-                info.file_size,              # Uncompressed size
-                len(filename_bytes),         # Filename length
-                len(extra)                   # Extra field length
-            )
-            fout.write(header)
+            fout.write(_LOCAL_HEADER.pack(
+                _LOCAL_SIG,
+                info.extract_version,
+                flags,
+                info.compress_type,
+                _time,
+                _date,
+                info.CRC,
+                info.compress_size,
+                info.file_size,
+                len(filename_bytes),
+                len(extra),
+            ))
             fout.write(filename_bytes)
             fout.write(extra)
 
-            # Copy raw compressed/uncompressed payload in 64KB chunks
-            bytes_left = csize
-            while bytes_left > 0:
-                chunk = fin.read(min(bytes_left, 65536))
+            fin.seek(data_offset)
+            remaining = info.compress_size
+            while remaining > 0:
+                chunk = fin.read(min(remaining, 65536))
                 if not chunk:
-                    raise IOError(f"Unexpected EOF while reading {info.filename}")
+                    raise UnsupportedArchiveError("unexpected EOF in %r" % info.filename)
                 fout.write(chunk)
-                bytes_left -= len(chunk)
+                remaining -= len(chunk)
 
-            # Record central directory entry info
-            central_dirs.append((info, filename_bytes, bytes(extra), local_header_offset))
+            central.append((info, filename_bytes, bytes(extra), flags, local_header_offset))
 
-        # Central Directory
         cd_start = fout.tell()
-        for info, filename_bytes, extra, local_header_offset in central_dirs:
+        for info, filename_bytes, extra, flags, local_header_offset in central:
+            comment = info.comment or b""
             mtime, mdate = dostime(info.date_time)
-            cd_header = struct.pack(
-                "<IHHHHHHIIIHHHHHII",
-                0x02014b50,                 # Central header signature
-                info.create_version,         # Version made by
-                info.extract_version,        # Version needed
-                info.flag_bits,              # Flags
-                info.compress_type,          # Compression
+            fout.write(_CENTRAL_HEADER.pack(
+                _CENTRAL_SIG,
+                info.create_version,
+                info.extract_version,
+                flags,
+                info.compress_type,
                 mtime,
                 mdate,
                 info.CRC,
@@ -115,38 +184,35 @@ def align_with_python(in_apk, out_apk, alignment=4):
                 info.file_size,
                 len(filename_bytes),
                 len(extra),
-                len(info.comment or b""),
-                0,                           # Disk number start
+                len(comment),
+                0,
                 info.internal_attr,
                 info.external_attr,
-                local_header_offset          # Relative offset of local header
-            )
-            fout.write(cd_header)
+                local_header_offset,
+            ))
             fout.write(filename_bytes)
             fout.write(extra)
-            if info.comment:
-                fout.write(info.comment)
+            fout.write(comment)
 
         cd_size = fout.tell() - cd_start
-        # End of Central Directory
-        eocd = struct.pack(
-            "<IHHHHIIH",
-            0x06054b50,
+        if cd_start > _MAX_UINT32 or cd_size > _MAX_UINT32:
+            raise UnsupportedArchiveError("archive requires ZIP64")
+        fout.write(_EOCD.pack(
+            _EOCD_SIG,
             0,
             0,
-            len(central_dirs),
-            len(central_dirs),
+            len(central),
+            len(central),
             cd_size,
             cd_start,
-            0
-        )
-        fout.write(eocd)
+            0,
+        ))
     return True
 
 
 def main():
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <in_apk> <out_apk> [alignment]", file=sys.stderr)
+        print("Usage: %s <in_apk> <out_apk> [alignment]" % sys.argv[0], file=sys.stderr)
         sys.exit(1)
 
     in_apk = sys.argv[1]
@@ -154,14 +220,14 @@ def main():
     alignment = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 
     if not os.path.isfile(in_apk):
-        print(f"Error: input file {in_apk} not found", file=sys.stderr)
+        print("Error: input file %s not found" % in_apk, file=sys.stderr)
         sys.exit(1)
 
     if align_with_binary(in_apk, out_apk, alignment):
-        print(f"[OK] ZipAligned using binary: {out_apk}")
+        print("[OK] ZipAligned using binary: %s" % out_apk)
     else:
         align_with_python(in_apk, out_apk, alignment)
-        print(f"[OK] ZipAligned using Python 4-byte aligner: {out_apk}")
+        print("[OK] ZipAligned using Python 4-byte aligner: %s" % out_apk)
 
 
 if __name__ == "__main__":

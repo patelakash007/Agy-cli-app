@@ -14,13 +14,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.regex.Matcher;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
-/** Pure-Java tar fallback with path-checked regular files, directories and symlinks. */
+/**
+ * Pure-Java tar fallback. Every header goes through {@link TarPolicy}; this
+ * class only performs the Android-specific materialization (files, dirs, links)
+ * and enforces archive-wide entry/total bounds and duplicate rejection.
+ */
 public final class TarExtractor {
-
-    private static final String TAG = "TarExtractor";
 
     private TarExtractor() {
     }
@@ -35,86 +38,91 @@ public final class TarExtractor {
     public static int untar(InputStream in, File dest) throws IOException {
         byte[] header = new byte[512];
         String pendingName = null;
+        Set<String> seen = new HashSet<>();
         int links = 0;
+        int entries = 0;
+        long totalBytes = 0;
+
         while (TarHeader.readBlock(in, header)) {
             if (TarHeader.isZeroBlock(header)) {
                 break;
             }
-            String name = TarHeader.readField(header, 0, 100);
-            long mode = TarHeader.readOctal(header, 100, 8);
-            long size = TarHeader.readOctal(header, 124, 12);
-            int type = header[156] & 0xff;
-            String link = TarHeader.readField(header, 157, 100);
-            String dirPrefix = TarHeader.readField(header, 345, 155);
-            if (type == 0) {
-                type = '0';
-            }
-            if (type == 'L') {
-                pendingName = new String(readEntry(in, size), StandardCharsets.UTF_8).trim();
+            TarPolicy.Entry entry = TarPolicy.parse(header);
+
+            if (entry.type == 'L') {
+                if (pendingName != null) {
+                    throw new IOException("nested GNU long-name entry");
+                }
+                byte[] nameBytes = readLongName(in, entry.size);
+                String longName = new String(nameBytes, StandardCharsets.UTF_8).trim();
+                String normalized = TarPolicy.normalizeName(longName);
+                if (normalized == null || normalized.isEmpty()) {
+                    throw new IOException("unsafe GNU long-name entry");
+                }
+                pendingName = normalized;
                 continue;
             }
-            if (type == 'K' || type == 'x' || type == 'g') {
-                skipEntry(in, size);
-                continue;
+
+            entries++;
+            if (entries > TarPolicy.MAX_ENTRIES) {
+                throw new IOException("tar archive has too many entries");
             }
+            String name = entry.name;
             if (pendingName != null) {
                 name = pendingName;
                 pendingName = null;
             }
-            if (dirPrefix != null && !dirPrefix.isEmpty()) {
-                name = dirPrefix + "/" + name;
-            }
-            name = TarPath.normalize(name);
-            if (name == null) {
-                throw new IOException("unsafe tar entry path");
-            }
             if (name.isEmpty()) {
-                skipEntry(in, size);
+                skipEntry(in, entry.size);
                 continue;
             }
+            if (!seen.add(name)) {
+                throw new IOException("duplicate tar entry: " + name);
+            }
+            totalBytes += entry.size;
+            if (totalBytes > TarPolicy.MAX_TOTAL_BYTES) {
+                throw new IOException("tar archive expands beyond the allowed total size");
+            }
+
             File out = new File(dest, name);
             ensureParentInside(dest, out);
 
-            if (type == '5') {
-                skipEntry(in, size);
+            if (entry.type == '5') {
+                skipEntry(in, entry.size);
                 removeConflictingLeaf(out, true);
                 if (!out.isDirectory() && !out.mkdirs() && !out.isDirectory()) {
                     throw new IOException("cannot create dir " + out);
                 }
-                FileModeUtil.applyMode(out, mode);
-            } else if (type == '0') {
+                FileModeUtil.applyMode(out, entry.mode);
+            } else if (entry.type == '0') {
                 removeConflictingLeaf(out, false);
-                writeFile(in, out, size, dest);
-                FileModeUtil.applyMode(out, mode);
-            } else if (type == '2') {
-                skipEntry(in, size);
-                validateLinkTarget(dest, out, link);
+                writeFile(in, out, entry.size, dest);
+                FileModeUtil.applyMode(out, entry.mode);
+            } else if (entry.type == '2') {
+                skipEntry(in, entry.size);
+                validateLinkTarget(dest, out, entry.link);
                 removeConflictingLeaf(out, false);
                 try {
-                    Os.symlink(link, out.getAbsolutePath());
+                    Os.symlink(entry.link, out.getAbsolutePath());
                 } catch (ErrnoException e) {
-                    throw new IOException("cannot create symlink " + out + " -> " + link, e);
+                    throw new IOException("cannot create symlink " + out + " -> " + entry.link, e);
                 }
                 links++;
             } else {
-                skipEntry(in, size);
-                throw new IOException("unsupported tar entry type " + (char) type + " at " + name);
+                // TarPolicy already rejected unsupported types; keep a defensive guard.
+                skipEntry(in, entry.size);
+                throw new IOException("unsupported tar entry type " + (char) entry.type + " at " + name);
             }
+        }
+
+        if (pendingName != null) {
+            throw new IOException("dangling GNU long-name entry");
         }
         return links;
     }
 
     private static void validateLinkTarget(File dest, File linkFile, String target) throws IOException {
-        if (target == null || target.isEmpty() || target.indexOf('\0') >= 0) {
-            throw new IOException("empty/invalid tar symlink target at " + linkFile);
-        }
-        if (target.startsWith("/")) {
-            Matcher matcher = EnvPaths.TERMUX_ANY_PREFIX.matcher(target);
-            if (!matcher.lookingAt()) {
-                throw new IOException("absolute tar symlink escapes env prefix: " + target);
-            }
-            return;
-        }
+        TarPolicy.validateLinkTarget(target);
         File resolved = new File(linkFile.getParentFile(), target);
         if (!PathSafety.isInside(dest, resolved)) {
             throw new IOException("tar symlink escapes env prefix: " + linkFile + " -> " + target);
@@ -157,9 +165,9 @@ public final class TarExtractor {
         }
     }
 
-    private static byte[] readEntry(InputStream in, long size) throws IOException {
-        if (size < 0 || size > (8L << 20)) {
-            throw new IOException("unreasonable tar entry size: " + size);
+    private static byte[] readLongName(InputStream in, long size) throws IOException {
+        if (size < 0 || size > TarPolicy.MAX_LONG_NAME_BYTES) {
+            throw new IOException("unreasonable GNU long-name size: " + size);
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream((int) size);
         copy(in, out, size);

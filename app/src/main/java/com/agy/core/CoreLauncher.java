@@ -1,7 +1,5 @@
 package com.agy.core;
 
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
 import com.agy.runtime.RuntimeManager;
@@ -78,17 +76,11 @@ public final class CoreLauncher {
         // Pre-flight: kill any zombie/orphan core instances in app scope
         killOrphanCoreProcesses(filesDir);
 
-        // Phase 1 only: extract + verify the core (fail-closed, throws on
-        // corruption) and return. Never wait on the ~90 MB bionic env here.
+        // Extract + verify APK-owned runtime assets (fail-closed, throws on
+        // corruption). No delayed shim refresh is scheduled: a delayed writer
+        // could otherwise mutate live executables after a cancelled start
+        // (C08c/R28). installCore() already refreshes the bridges.
         runtime.installCore();
-        // Phase 2: env toolchain + bridges on a daemon thread, deferred
-        // by 3500ms to avoid peak disk I/O throttling during startup.
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                runtime.installEnvInBackground();
-            }
-        }, 3500);
         ProcessBuilder pb = new ProcessBuilder(runtime.coreCommand());
         pb.directory(filesDir);
         pb.redirectErrorStream(true);

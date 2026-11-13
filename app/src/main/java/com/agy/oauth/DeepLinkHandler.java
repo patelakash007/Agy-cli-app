@@ -31,6 +31,16 @@ public final class DeepLinkHandler {
         return OAuthConstants.CALLBACK_SCHEME;
     }
 
+    /**
+     * An unsolicited deep link is never proof of authentication (B04a/R06).
+     *
+     * Until the real vendor flow is verified (V1/B04b) this handler accepts only
+     * this flavor's own callback scheme and host, writes nothing to CLI stdin,
+     * and never announces success. A token/cookie/URL is not correlation.
+     *
+     * @return true when the intent matched this flavor's callback shape (it is
+     *         consumed but intentionally ignored), false otherwise.
+     */
     public static boolean handleDeepLink(Activity activity, Intent intent, Runnable onSuccess) {
         if (activity == null || intent == null || intent.getData() == null) {
             return false;
@@ -38,26 +48,17 @@ public final class DeepLinkHandler {
         Uri data = intent.getData();
         String expectedScheme = getCallbackScheme(activity);
         String scheme = data.getScheme();
-        boolean schemeOk = (scheme != null) && (expectedScheme.equalsIgnoreCase(scheme)
-                || "antigravity".equalsIgnoreCase(scheme)
-                || "antigravity-dev".equalsIgnoreCase(scheme));
+        // Never accept the other flavor's scheme.
+        boolean schemeOk = scheme != null && expectedScheme.equalsIgnoreCase(scheme);
         String host = data.getHost();
         boolean hostOk = OAuthConstants.CALLBACK_HOST.equalsIgnoreCase(host)
                 || OAuthConstants.CALLBACK_HOST_COMPAT.equalsIgnoreCase(host);
         if (!schemeOk || !hostOk) {
             return false;
         }
-        Log.i(OAuthConstants.TAG, "auth-success deep link received: "
-                + SensitiveDataRedactor.safeUrl(data.toString())
-                + " tokenPresent=" + OAuthTokenStore.hasToken(activity));
-        String code = data.getQueryParameter("code");
-        if (code != null && !code.trim().isEmpty()) {
-            Log.i(OAuthConstants.TAG, "submitting OAuth code from deep link to CLI stdin");
-            com.agy.core.CoreRuntimeState.submitStdin(code.trim() + "\r\n");
-        }
-        if (onSuccess != null) {
-            onSuccess.run();
-        }
+        Log.i(OAuthConstants.TAG, "auth callback shape received but no verified active "
+                + "correlation exists; ignoring it and writing no stdin: "
+                + SensitiveDataRedactor.safeUrl(data.toString()));
         return true;
     }
 }

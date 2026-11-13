@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 """
 01_gen_config.py - Generates BuildConfig.java, gen.xml, and dev-aware AndroidManifest.xml.
+
+All numeric build fields are validated before anything is written. Configured
+MIN_API/TARGET_SDK values are applied to the generated manifest so compile, D8
+and manifest metadata cannot silently disagree (R16/A02).
 """
-import sys
-import os
 import html
-import shutil
+import os
 import re
+import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+
+# Escapes that would be interpreted later (Java/XML) instead of being literal text.
+_ESCAPE_LITERAL = re.compile(r"\\[xu][0-9a-fA-F]{2,4}")
+_PACKAGE_ID = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$")
+
+
+class ConfigError(Exception):
+    """A config value that must not be turned into generated source."""
 
 
 def parse_env(path):
@@ -25,9 +36,74 @@ def parse_env(path):
     return data
 
 
+def require_int(env, key, default, minimum, maximum):
+    raw = str(env.get(key, str(default))).strip()
+    if not re.fullmatch(r"[0-9]{1,10}", raw):
+        raise ConfigError("%s must be a decimal integer (got %r)" % (key, raw))
+    value = int(raw)
+    if value < minimum or value > maximum:
+        raise ConfigError("%s must be between %d and %d (got %d)"
+                          % (key, minimum, maximum, value))
+    return value
+
+
+def require_string(env, key, default):
+    value = env.get(key, default)
+    if value is None:
+        value = default
+    if not value:
+        raise ConfigError("%s must not be empty" % key)
+    for ch in value:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            raise ConfigError("%s contains a control character" % key)
+    if _ESCAPE_LITERAL.search(value):
+        raise ConfigError("%s contains an escape sequence instead of literal text" % key)
+    return value
+
+
+def require_package(env, key, default):
+    value = require_string(env, key, default).strip()
+    if not _PACKAGE_ID.match(value):
+        raise ConfigError("%s is not a valid Android package id: %r" % (key, value))
+    return value
+
+
 def java_string(value):
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    escaped = (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
     return '"' + escaped + '"'
+
+
+def apply_uses_sdk(content, min_api, target_sdk):
+    """Replace or insert <uses-sdk> so the manifest follows MIN_API/TARGET_SDK."""
+    sdk = '<uses-sdk android:minSdkVersion="%d" android:targetSdkVersion="%d" />' % (
+        min_api,
+        target_sdk,
+    )
+    if re.search(r"<uses-sdk\b", content):
+        content = re.sub(
+            r'android:minSdkVersion\s*=\s*"[^"]*"',
+            'android:minSdkVersion="%d"' % min_api,
+            content,
+            count=1,
+        )
+        content = re.sub(
+            r'android:targetSdkVersion\s*=\s*"[^"]*"',
+            'android:targetSdkVersion="%d"' % target_sdk,
+            content,
+            count=1,
+        )
+        return content
+    match = re.search(r"<manifest\b[^>]*>", content)
+    if match is None:
+        raise ConfigError("AndroidManifest.xml has no <manifest> element")
+    return content[: match.end()] + "\n    " + sdk + content[match.end():]
 
 
 def main():
@@ -37,18 +113,30 @@ def main():
 
     is_dev = os.environ.get("DEV_MODE") == "1"
 
-    pkg_base = env.get("PKG", "com.agy")
-    app_id = env.get("PKG_DEV", "com.agy.dev") if is_dev else pkg_base
-    port = env.get("PORT_DEV", "45158") if is_dev else env.get("PORT", "45157")
-    port_dev = env.get("PORT_DEV", "45158")
-    gw_port = env.get("GATEWAY_PORT_DEV", "45161") if is_dev else env.get("GATEWAY_PORT", "45160")
-    core_version = env.get("CORE_VERSION", "1.0.0")
-    app_version_name = env.get("APP_VERSION_NAME", "1.0.0")
-    app_version_code = env.get("APP_VERSION_CODE", "1")
-    oauth_scheme = env.get("OAUTH_SCHEME", "antigravity")
-    app_name = env.get("APP_NAME_DEV", "Antigravity Dev") if is_dev else env.get("APP_NAME", "Antigravity")
-    min_api = env.get("MIN_API", "24")
-    target_sdk = env.get("TARGET_SDK", "28")
+    try:
+        pkg_base = require_package(env, "PKG", "com.agy")
+        pkg_dev = require_package(env, "PKG_DEV", "com.agy.dev")
+        app_id = pkg_dev if is_dev else pkg_base
+        port = require_int(env, "PORT_DEV" if is_dev else "PORT",
+                           45158 if is_dev else 45157, 1, 65535)
+        port_dev = require_int(env, "PORT_DEV", 45158, 1, 65535)
+        gw_port = require_int(env, "GATEWAY_PORT_DEV" if is_dev else "GATEWAY_PORT",
+                              45161 if is_dev else 45160, 1, 65535)
+        core_version = require_string(env, "CORE_VERSION", "1.0.0")
+        app_version_name = require_string(env, "APP_VERSION_NAME", "1.0.0")
+        app_version_code = require_int(env, "APP_VERSION_CODE", 1, 1, 2100000000)
+        oauth_scheme = require_string(env, "OAUTH_SCHEME", "antigravity")
+        app_name = require_string(env, "APP_NAME_DEV" if is_dev else "APP_NAME",
+                                  "Antigravity Dev" if is_dev else "Antigravity")
+        min_api = require_int(env, "MIN_API", 24, 21, 35)
+        target_sdk = require_int(env, "TARGET_SDK", 28, 21, 35)
+        if min_api > target_sdk:
+            raise ConfigError("MIN_API (%d) must not exceed TARGET_SDK (%d)"
+                              % (min_api, target_sdk))
+    except ConfigError as error:
+        print("[ERROR] %s" % error, file=sys.stderr)
+        sys.exit(2)
+
     is_debug = "true" if is_dev else "false"
 
     pkg_dir = os.path.join(build_dir, "gen", *pkg_base.split("."))
@@ -63,16 +151,16 @@ def main():
         f.write("public final class BuildConfig {\n")
         f.write("    private BuildConfig() {}\n\n")
         f.write("    public static final String APPLICATION_ID = %s;\n" % java_string(app_id))
-        f.write("    public static final int PORT = %s;\n" % port)
-        f.write("    public static final int PORT_DEV = %s;\n" % port_dev)
-        f.write("    public static final int GATEWAY_PORT = %s;\n" % gw_port)
+        f.write("    public static final int PORT = %d;\n" % port)
+        f.write("    public static final int PORT_DEV = %d;\n" % port_dev)
+        f.write("    public static final int GATEWAY_PORT = %d;\n" % gw_port)
         f.write("    public static final String CORE_VERSION = %s;\n" % java_string(core_version))
         f.write("    public static final String APP_VERSION_NAME = %s;\n" % java_string(app_version_name))
-        f.write("    public static final int APP_VERSION_CODE = %s;\n" % app_version_code)
+        f.write("    public static final int APP_VERSION_CODE = %d;\n" % app_version_code)
         f.write("    public static final String OAUTH_SCHEME = %s;\n" % java_string(oauth_scheme))
         f.write("    public static final String APP_NAME = %s;\n" % java_string(app_name))
-        f.write("    public static final int MIN_API = %s;\n" % min_api)
-        f.write("    public static final int TARGET_SDK = %s;\n" % target_sdk)
+        f.write("    public static final int MIN_API = %d;\n" % min_api)
+        f.write("    public static final int TARGET_SDK = %d;\n" % target_sdk)
         f.write("    public static final boolean DEBUG = %s;\n" % is_debug)
         f.write("}\n")
 
@@ -82,33 +170,38 @@ def main():
         f.write('<?xml version="1.0" encoding="utf-8"?>\n')
         f.write("<resources>\n")
         f.write('    <string name="app_name">%s</string>\n' % html.escape(app_name, quote=True))
-        f.write('    <integer name="https_server_port">%s</integer>\n' % port)
-        f.write('    <integer name="gateway_port">%s</integer>\n' % gw_port)
+        f.write('    <integer name="https_server_port">%d</integer>\n' % port)
+        f.write('    <integer name="gateway_port">%d</integer>\n' % gw_port)
         f.write('    <string name="oauth_scheme">%s</string>\n' % html.escape(oauth_scheme, quote=True))
         f.write("</resources>\n")
 
-    # 3. AndroidManifest.xml (dev-aware)
+    # 3. AndroidManifest.xml (dev-aware, configured SDK levels)
     src_manifest = os.path.join(PROJECT_ROOT, "app", "src", "main", "AndroidManifest.xml")
     target_manifest = os.path.join(build_dir, "AndroidManifest.xml")
     with open(src_manifest, "r", encoding="utf-8") as f:
         content = f.read()
 
-    content = content.replace('${applicationId}', app_id)
-    content = re.sub(r'android:versionName="[^"]+"', f'android:versionName="{app_version_name}"', content)
-    content = re.sub(r'android:versionCode="[^"]+"', f'android:versionCode="{app_version_code}"', content)
+    content = content.replace("${applicationId}", app_id)
+    content = re.sub(r'android:versionName="[^"]*"',
+                     'android:versionName="%s"' % app_version_name, content, count=1)
+    content = re.sub(r'android:versionCode="[^"]*"',
+                     'android:versionCode="%d"' % app_version_code, content, count=1)
+    content = apply_uses_sdk(content, min_api, target_sdk)
 
     if is_dev:
         content = content.replace('package="com.agy"', 'package="com.agy.dev"')
-        content = content.replace('com.agy.permission.INTERNAL_BROADCAST', 'com.agy.dev.permission.INTERNAL_BROADCAST')
-        content = content.replace('<application', '<application android:debuggable="true"')
-        print(f"[*] Configured DEV manifest: package=com.agy.dev, debuggable=true")
+        content = content.replace('com.agy.permission.INTERNAL_BROADCAST',
+                                  'com.agy.dev.permission.INTERNAL_BROADCAST')
+        content = content.replace('<application', '<application android:debuggable="true"', 1)
+        print("[*] Configured DEV manifest: package=com.agy.dev, debuggable=true")
 
     with open(target_manifest, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"[OK] Generated BuildConfig.java -> {build_config_path}")
-    print(f"[OK] Generated gen.xml -> {gen_xml_path}")
-    print(f"[OK] Generated manifest -> {target_manifest}")
+    print("[OK] Generated BuildConfig.java -> %s" % build_config_path)
+    print("[OK] Generated gen.xml -> %s" % gen_xml_path)
+    print("[OK] Generated manifest -> %s (minSdk=%d targetSdk=%d)"
+          % (target_manifest, min_api, target_sdk))
 
 
 if __name__ == "__main__":

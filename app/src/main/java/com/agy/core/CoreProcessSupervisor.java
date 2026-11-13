@@ -1,6 +1,7 @@
 package com.agy.core;
 
 import android.content.Context;
+import android.os.Build;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -53,11 +54,25 @@ public final class CoreProcessSupervisor {
 
     public void stop() {
         stopping = true;
-        CoreRuntimeState.stdinWriter = null;
-        openUrlWatcher.setProcess(null);
-        destroy(process, appContext.getFilesDir());
+        // Teardown is best-effort per step so one failure cannot skip the rest.
+        try {
+            CoreRuntimeState.stdinWriter = null;
+        } catch (Throwable ignored) {
+        }
+        try {
+            openUrlWatcher.setProcess(null);
+        } catch (Throwable ignored) {
+        }
+        try {
+            destroy(process, appContext.getFilesDir());
+        } catch (Throwable ignored) {
+        }
+        process = null;
         if (worker != null) {
-            worker.interrupt();
+            try {
+                worker.interrupt();
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -175,6 +190,16 @@ public final class CoreProcessSupervisor {
                 break;
             } finally {
                 CoreLogWriter.closeQuietly(log);
+                // Release ownership even when teardown above threw (C06/R24).
+                process = null;
+                try {
+                    CoreRuntimeState.stdinWriter = null;
+                } catch (Throwable ignored) {
+                }
+                try {
+                    openUrlWatcher.setProcess(null);
+                } catch (Throwable ignored) {
+                }
             }
         }
     }
@@ -252,14 +277,22 @@ public final class CoreProcessSupervisor {
         if (proc != null) {
             try {
                 proc.destroy();
-            } catch (Exception ignored) {
+            } catch (Throwable ignored) {
             }
-            try {
-                proc.destroyForcibly();
-            } catch (Exception ignored) {
+            // destroyForcibly() is API 26+. Calling it on API 24/25 raises
+            // NoSuchMethodError, which is an Error and escaped cleanup (R24).
+            if (Build.VERSION.SDK_INT >= 26) {
+                try {
+                    proc.destroyForcibly();
+                } catch (Throwable ignored) {
+                }
             }
         }
-        CoreLauncher.killOrphanCoreProcesses(filesDir);
+        try {
+            CoreLauncher.killOrphanCoreProcesses(filesDir);
+        } catch (Throwable t) {
+            Log.w(TAG, "orphan cleanup failed: " + t);
+        }
     }
 
     private static String getLastLinesFromLog(java.io.File filesDir, int maxLines) {

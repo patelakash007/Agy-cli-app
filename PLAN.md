@@ -1,8 +1,10 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
-- **Updated:** 2026-11-11
-- **Reviewed baseline:** `d728f94` (`Initial version`); always inspect current
-  `HEAD`, working-tree changes, and the latest instruction snapshot before work.
+- **Updated:** 2026-11-13
+- **Reviewed baseline:** `d728f94` (`Initial version`); the 2026-11-13
+  single-agent pass below is uncommitted work on top of `5c57a74`. Always inspect
+  current `HEAD`, working-tree changes, and the latest instruction snapshot
+  before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -108,7 +110,7 @@ agents used to audit these documents are read-only, not fix-task owners.
 
 | Worker | Task | Base + instruction snapshot | Isolated directory/branch | Exclusive writes + test command | State / next action |
 |---|---|---|---|---|---|
-| Unassigned | — | — | — | — | Allocate after checking section 6 |
+| Single agent / 2026-11-13 | A02, A04a, A05, A06, A07, A08, A09, B01a, B01b, B02, B04a, C06, C07, C08a–c, G02a | `5c57a74` + AGENTS/PLAN snapshot; uncommitted worktree | this chat worktree | builder/tests + the runtime files named in each card | REVIEW/DONE per card; next executable task B05, then B03 |
 
 Replace/add rows when allocating work; clear them only after recording the
 completion receipt or abandoned-work reason. A chat session that disappears does
@@ -175,7 +177,8 @@ system-shell fallback is not Bash. A small APK is not the full installed size.
 ### 2.3 Verified baseline and known failures
 
 Task **A01 is DONE**: the repository contains offline Python/Java tests and a
-separate build-smoke command. The harness deliberately exposes known defects.
+separate build-smoke command. The harness now carries persistent regressions for
+the defects fixed on 2026-11-13 (section 2.3).
 
 Run:
 
@@ -183,22 +186,25 @@ Run:
 bash tests/run_host_tests.sh
 ```
 
-The 2026-11-11 review actually ran `bash tests/run_host_tests.sh --verbose`:
-14 Python cases (10 pass, 4 fail) and 14 Java checks (11 pass, 3 fail), exit 1.
-The seven existing failures are:
+On 2026-11-13 the offline suite was extended and is green on the integrated
+working tree: `bash tests/run_host_tests.sh` ran **27 Python cases and 22 Java
+checks, all passing (exit 0)**. The former seven expected failures (A02/R16,
+A05/R19, B02/R04) are now regressions, not permanent reds:
 
-- **A02 / R16:** configured min/target SDK values do not reach the manifest;
-  invalid numeric and control-character config is accepted (3 failures).
-- **A05 / R19:** ZIP data-descriptor input produces a corrupt aligned archive
-  (1 failure).
-- **B02 / R04:** HTTP, arbitrary-host, and suffix-lookalike session URLs are
-  accepted (3 failures).
+- A02/R16: SDK propagation, invalid numeric input and control/escape characters.
+- A05/R19: data-descriptor input is rebuilt from central-directory metadata.
+- B02/R04: strict trusted URL policy, including encoded slash, extra segments,
+  non-default port, trailing-dot host and control characters.
+- A07/A08/A09: secondary DEX preservation, fail-closed runtime assets, and the
+  real `--fast` ZIP method (`tests/python/test_package_inputs.py`).
+- A04a/G02a: release signing refusal and no-unattended-publication workflow
+  policy (`tests/python/test_release_guard.py`).
+- C07: concurrent atomic publication and failure preservation (Java runner).
 
-Do not suppress these failures. Fix the named tasks and make the same command
-green. Before unrelated work, record the current failures; after it, show that
-there are no new failures. Once fixed, these are regressions to keep, not
-permanent permission for a red suite. This suite currently does not cover the
-Android API, process races, consent, downloader, or full tar security behavior.
+The Java suite needs a JDK on `PATH`; this VM has none preinstalled, so the
+2026-11-13 pass used a workspace-local Temurin JDK 17. The suite still does not
+cover the Android API, process races, consent, downloader/installers, device
+behaviour, or full tar security behavior.
 
 Run the separate release/dev compile and package smoke check with:
 
@@ -227,8 +233,9 @@ B01 and must not be mistaken for completed safety work.
 ## 3. Findings register
 
 These findings came from source review and local probes against the baseline.
-Method names and current behavior outrank old line numbers. **All R01–R23 remain
-OPEN at this baseline.** “Reproduced” in this table means offline fixture
+Method names and current behavior outrank old line numbers. On 2026-11-13,
+**R04, R16 and R19 are FIXED (offline evidence)**, **R07, R18, R20 are PARTIAL**,
+and the remaining R01–R23 are still OPEN. Section 3.2 records the per-bug state. “Reproduced” in this table means offline fixture
 reproduction, not a device test, unless explicitly stated. Other implementation
 findings are source-confirmed; goal blockers record missing capabilities.
 
@@ -264,10 +271,11 @@ scope is accepted. Closure is recorded here and in section 9, never by deletion.
 
 ### 3.1 Additional findings from the 2026-11-11 review
 
-**R24–R32 are OPEN.** These were added after inspecting the current source and
-two independent read-only audits. Runtime cases are source-confirmed and await
-their regression/device evidence; the build cases were reproduced with isolated
-offline review fixtures. No production fix or new checked-in test is claimed.
+**R24–R32 status (2026-11-13):** R29–R32 are FIXED with persistent offline
+regressions; R24–R28 have bounded production fixes in the working tree but are
+**PARTIAL** because the required Android device evidence is still missing. The
+build cases were originally reproduced with isolated offline review fixtures;
+the new tests are checked in (section 3.2).
 
 | ID | Severity / evidence level | Trigger and consequence | Exact starting evidence | Owning task |
 |---|---|---|---|---|
@@ -294,6 +302,30 @@ they affect already-installed APK-owned helper/certificate/shim copies. R25 is a
 active configuration-write race, not merely a future editor risk. The suspected
 D8 space-containing-path failure was disproved by the audit and is **not** a bug
 entry. Do not convert unverified suspicions into findings.
+
+### 3.2 Status after the 2026-11-13 single-agent pass
+
+All changes below are uncommitted work on this chat's worktree. “FIXED” means
+the named offline regression passes; “PARTIAL” means the code is present but a
+required device/integration check is still missing.
+
+| ID | Status | Evidence / remaining gate |
+|---|---|---|
+| R04 | FIXED | Strict `CoreRuntimeState.isValidSessionUrl`; consumers use it; 15 Java URL checks pass. B03/C01/F04 consumer work still open. |
+| R07 | PARTIAL | Automatic login/TOS keystrokes and the Tab-Tab-Enter dashboard shortcut removed; settings/onboarding seeding deleted. No B01a/B01b device tests yet; E02 still needed for usable setup. |
+| R16 | FIXED | Config validation + manifest `<uses-sdk>` propagation + D8 min-api wiring; 7 Python config tests pass; both flavors compile in smoke. |
+| R18 | PARTIAL | Release signing fails closed without owner inputs (exit 3, signer not invoked); A04b identity/migration still BLOCKED (P3). |
+| R19 | FIXED | Aligner rebuilds headers from the central directory; data descriptors preserved; ZIP64/encryption/unknown methods rejected. |
+| R20 | PARTIAL | G02a guard: tags no longer publish, least-privilege permissions, explicit `PUBLISH` + protected environment, release job still refuses. G02b remains blocked. |
+| R24 | PARTIAL | API-26 `destroyForcibly`/timed `waitFor` guarded or replaced; teardown steps isolated with `Throwable`. API 24/25 device run still pending. |
+| R25 | PARTIAL | Writer-owned unique temporaries, atomic rename, no in-place fallback; host concurrency tests pass. Android callers not device-tested. |
+| R26 | PARTIAL | Helper published by content hash + AArch64 ELF check; old helper preserved on failure. APK upgrade device test pending. |
+| R27 | PARTIAL | CA bundle validated by SHA-256 and published atomically; interrupted partial repaired. Installed-tool TLS still D03. |
+| R28 | PARTIAL | Scripts staged/mode-checked/renamed; identical content skipped; delayed startup refresh removed. Bionic execution device evidence pending. |
+| R29 | FIXED | Both selection flags exit 2; unknown args exit 2; zero-case discovery fails; PASS prints executed counts. |
+| R30 | FIXED | `--fast` stores plain-text assets (ZIP_STORED) and the banner/cache claim is truthful. |
+| R31 | FIXED | All `classes*.dex` packaged or the build fails; invalid DEX/empty output rejected. |
+| R32 | FIXED | Runtime packaging fails when assets/marker/helper/CA are missing; `--compile-only` is explicit; smoke is labelled compile-only. |
 
 ## 4. Owner decisions and external gates
 
@@ -373,10 +405,11 @@ until E02 supplies the real terminal.
 
 ### 6.1 The next single-agent task
 
-**B01a** is the highest-priority starting task. It removes automatic consent and
-unsafe defaults. Then prefer B01b, B04a, and B02/B03 before expanding privileges.
-Build/parser fixes do not need to wait for consent work: that was a priority
-suggestion, not a technical dependency.
+The next executable task is **B05** (bounded tar policy), then **B03** (safe hosted
+WebView navigation/permissions, now unblocked by B02), then the C01/C02 lifecycle
+slice. B01a/B01b/B04a and C06–C08 are implemented but need their dedicated
+device/fixture acceptance before closing. Build/parser fixes did not wait for
+consent work: that was a priority suggestion, not a technical dependency.
 
 ### 6.2 Initial five-worker allocation
 
@@ -498,7 +531,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - **Important:** the host suite is intentionally red for A02/A05/B02; A01 did not
   declare those defects fixed.
 
-#### A02 — Truthful build configuration and SDK metadata — TODO
+#### A02 — Truthful build configuration and SDK metadata — DONE (offline)
 
 - **Depends on:** A01.
 - **Starting files / writes:** `modules/builder/01_gen_config.py`,
@@ -535,7 +568,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - No secret in git/arguments/logs and no publication until update/data migration
   is approved and tested.
 
-##### A04a — Refuse unconfigured release signing — TODO
+##### A04a — Refuse unconfigured release signing — DONE (offline)
 
 - **Depends on:** A01. **Conflict:** A02/A03/G02a shared builder/workflow changes.
 - **Writes:** `modules/builder/build_apk.sh`, `08_sign.sh`, `09_verify.sh` in that
@@ -556,7 +589,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   update/data-preservation device evidence. No default public debug key accepted
   for release or internal signature trust.
 
-#### A05 — Repair or reject unsupported ZIP alignment inputs — TODO
+#### A05 — Repair or reject unsupported ZIP alignment inputs — DONE (offline)
 
 - **Depends on:** A01.
 - **Writes:** `modules/builder/align.py`, `tests/python/test_align.py`.
@@ -567,7 +600,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   survive supported alignment. Existing data-descriptor regression must pass or
   receive a documented nonzero unsupported error.
 
-#### A06 — Never report green when no tests ran — TODO
+#### A06 — Never report green when no tests ran — REVIEW
 
 - **Depends on:** A01. **Bug:** R29.
 - **Writes:** `tests/run_host_tests.sh`, dedicated Python subprocess tests for the
@@ -580,7 +613,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   codes remain visible. Regression commands must not recursively invoke their own
   discovery or depend on existing `build-test/` output.
 
-#### A07 — Preserve or explicitly reject secondary DEX output — TODO
+#### A07 — Preserve or explicitly reject secondary DEX output — DONE (offline)
 
 - **Depends on:** A01. **Bug:** R31.
 - **Writes:** `modules/builder/06_package.sh`, optionally `04_dex.sh` and
@@ -595,7 +628,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - **Conflict:** A02 may own `04_dex.sh`/orchestrator; A08/A09 own package-stage
   changes. Serialize this packaging lane or assign one shared writer.
 
-#### A08 — Asset-inclusive packaging validation — TODO
+#### A08 — Asset-inclusive packaging validation — DONE (offline, native gate A03 pending)
 
 - **Implementation prerequisite:** A01; **native-asset acceptance gate:** A03.
   Fixture-only input/inventory policy can be implemented before the native gate.
@@ -610,7 +643,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   helper ELF, and CA inventory are checked using A03 output. No signing/network or
   mutation of a tracked native binary. Keep existing compile smoke coverage.
 
-#### A09 — Make fast-build behavior truthful — TODO
+#### A09 — Make fast-build behavior truthful — DONE (offline)
 
 - **Depends on:** A01. **Bug:** R30. **Low priority**, not a prerequisite for the
   runtime safety tasks.
@@ -637,7 +670,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - **Partial note:** documentation consolidation removed repository `AGENTS.md`
   injection only; all other B01 behavior still requires implementation/tests.
 
-##### B01a — Stop unsolicited input and permissive defaults — TODO
+##### B01a — Stop unsolicited input and permissive defaults — REVIEW
 
 - **Depends on:** A01. **Bug:** the input/defaults part of R07.
 - **Writes:** `app/src/main/java/com/agy/core/OpenUrlWatcher.java`,
@@ -655,7 +688,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - **Conflict:** B01b/B02/B03/B04a/C01 share these files; do not start overlapping
   integration rewrites simultaneously. C07 may change the text-writer interface.
 
-##### B01b — Preserve vendor state and show honest setup requirements — TODO
+##### B01b — Preserve vendor state and show honest setup requirements — REVIEW
 
 - **Depends on:** B01a. **Bug:** the fabricated/overwritten state part of R07.
 - **Starting files:** `app/src/main/java/com/agy/runtime/OnboardingSeeder.java`,
@@ -669,7 +702,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   are not fabricated or overwritten; startup reports SETUP_REQUIRED honestly.
   B01a no-input regressions stay green. M0 remains incomplete without E02.
 
-#### B02 — One strict trusted-URL policy — TODO
+#### B02 — One strict trusted-URL policy — DONE (offline; consumers migrated)
 
 - **Depends on:** A01.
 - **Starting files:** `app/src/main/java/com/agy/core/CoreRuntimeState.java`,
@@ -708,7 +741,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - Cancellation/retry must recover; an intent match alone never writes stdin or
   announces success.
 
-##### B04a — Refuse unsolicited auth input/success — TODO
+##### B04a — Refuse unsolicited auth input/success — REVIEW
 
 - **Depends on:** A01. No successful-vendor-flow proof is needed to refuse unsafe
   input. **Writes:** `app/src/main/java/com/agy/oauth/DeepLinkHandler.java`,
@@ -861,7 +894,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - Initial geometry is configurable; runtime resize belongs to E01/E02. Native
   fake-child tests cover no-output exit, large output, EOF, signal, and Stop.
 
-#### C06 — API-24-compatible, exception-safe process cleanup — TODO
+#### C06 — API-24-compatible, exception-safe process cleanup — REVIEW
 
 - **Depends on:** A01. **Bug:** R24; fifth initial worker packet.
 - **Writes:** `app/src/main/java/com/agy/core/CoreProcessSupervisor.java`,
@@ -878,7 +911,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   leaked ownership. Until these runtime checks exist, leave required acceptance
   REVIEW rather than claiming host compilation proves Android compatibility.
 
-#### C07 — Safe concurrent atomic text/configuration writes — TODO
+#### C07 — Safe concurrent atomic text/configuration writes — REVIEW
 
 - **Depends on:** A01. **Bug:** R25. Independent offline fix, not blocked on tools.
 - **Writes:** `app/src/main/java/com/agy/util/AtomicFileWriter.java`; dedicated
@@ -904,7 +937,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   Concurrent child edits to `ShellBridgeInstaller` are a file conflict, not an
   excuse to invent a dependency on the package ecosystem.
 
-##### C08a — Refresh the installed PTY helper safely — TODO
+##### C08a — Refresh the installed PTY helper safely — REVIEW
 
 - **Integrated prerequisites:** A03, C02. Offline identity/staging fixtures can be
   prepared earlier as a named test-only scope; they do not complete this task.
@@ -918,7 +951,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   wrong ELF/interrupted write/cancel preserves A, active helper replacement follows
   the agreed stop/restart contract. Device upgrade tests required for final closure.
 
-##### C08b — Repair and refresh the bundled CA file atomically — TODO
+##### C08b — Repair and refresh the bundled CA file atomically — REVIEW
 
 - **Depends on:** A01 for the bundled-asset repair, not D01/D02/P2.
 - **Bug:** R27. **Starting files:**
@@ -932,7 +965,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   exact-content fixture checks use no live network. Android startup/native-tool
   TLS verification is named separately; full installed-tool TLS remains D03.
 
-##### C08c — Publish complete executable shims, not torn live files — TODO
+##### C08c — Publish complete executable shims, not torn live files — REVIEW
 
 - **Depends on:** A01 for atomic-publication behavior. If delayed work is retained,
   its lifecycle integration also requires C02; remove redundant work rather than
@@ -1120,7 +1153,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
 - Wrong test/ELF/flavor/version/certificate blocks publication. Ubuntu/Termux
   compilation is never presented as standalone Android proof.
 
-##### G02a — Prevent unattended public release — TODO
+##### G02a — Prevent unattended public release — DONE (offline policy)
 
 - **Depends on:** A01; no legal/key decision is needed to refuse publication.
 - **Writes:** `.github/workflows/build-and-release.yml`, dedicated workflow-policy
@@ -1273,19 +1306,20 @@ the exact missing check, not DONE and not “nothing accomplished.”
 |---|---|---|
 | A01 / 2026-11-11 baseline | Offline entry point exists; review ran 14 Python + 14 Java checks. Compile/package smoke passed both flavors. | DONE for harness only; seven known assertions fail, no device proof. |
 | G03 / 2026-11-11 | Uncommitted documentation patch on `d728f94`, only `AGENTS.md`/`PLAN.md`. Inline Python validation PASS: original product sections 2–5 preserved verbatim, all old task IDs retained, 51 unique cards, all task references resolve, R01–R32 each registered once, P1–P6 retained, balanced fences, only two Markdown paths changed. `git diff --check` PASS. Independent read-only workflow review PASS (no blocking scope/dependency/ownership contradictions). | DONE for documentation only; all production bugs remain open. No commit, release, signing, account/user-data change, or device test. |
+| Single-agent pass / 2026-11-13 | Uncommitted worktree on `5c57a74`. Build: A02, A05–A09, A04a guard. Runtime: B01a/B01b consent removal, B02 URL policy, B04a unsolicited-auth removal, C06 API-24 cleanup, C07 atomic writer, C08a–c asset publication, G02a workflow guard. Checks actually run: `bash tests/run_host_tests.sh` → PASS, 27 Python + 22 Java cases; `bash tests/run_build_smoke.sh` → PASS both flavors (86/97 classes compiled, D8, package, system zipalign); `bash -n` over every edited shell script → clean; `08_sign.sh` release guard → exit 3 without invoking the signer. Workspace-local JDK 17 and build-tools r34 were used only for checks. | DONE (offline): A02, A04a, A05, A07, A08, A09, B02, G02a. REVIEW (device/integration evidence missing): A06, B01a, B01b, B04a, C06, C07, C08a–c. PARTIAL bugs: R07, R18, R20, R24–R28. Not performed: device/API 24–25 tests, APK install/upgrade, real signing, network/vendor login, tar (B05), WebView (B03), lifecycle (C01/C02), or any publication. |
 
-G03 reran `bash tests/run_host_tests.sh --verbose`: exit 1, Python 10/14 pass,
-Java 11/14 pass, same seven R16/R19/R04 failures and no new failures.
-`bash tests/run_build_smoke.sh`: exit 0, release/dev compile-package PASS, system
-ZIP aligner, empty runtime staging (not asset/native/runtime proof).
-Direct `bash tests/run_host_tests.sh --python-only --java-only` also reproduced
-R29 on the current tree: exit 0/PASS with no suites. That is evidence of a bug,
-not a successful validation run. New persistent regressions still belong to
-their owning tasks. Read-only audits used isolated temporary fixtures; final
-review performed no signing, network, installation, or device operations.
+The 2026-11-13 pass left the suite green: `bash tests/run_host_tests.sh` → 27
+Python + 22 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
+flavors compile/dex/package/align (still compile-only assets and the system ZIP
+aligner, not native/runtime proof). A06 was verified by direct invocation:
+`--python-only --java-only` → exit 2, unknown arg → exit 2, `--help` → exit 0,
+single-suite runs report real case counts. No persistent non-recursive runner
+test was added (a test that invokes the runner would recurse into its own
+discovery), so A06 remains REVIEW. No signing, installation, network or device
+operation was performed.
 
-**Next task:** B01a for a single agent, or prepare the isolated five-worker
-allocation in section 6.2. No fix worker is automatically assigned by G03.
+**Next task:** B05 for a single agent, then B03. The 2026-11-13 pass left no
+assigned worker; see the ledger row below and section 3.2 for partial statuses.
 
 Future rows must name actual commands, results, accepted revision/patch identity,
 reviewer (if any), and missing device/artifact evidence. Do not paste entire logs

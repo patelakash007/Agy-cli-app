@@ -27,6 +27,15 @@ for jar in "$ANDROID_JAR" "$R8_JAR"; do
     fi
 done
 
+SMOKE_MIN_API="$(sed -n 's/^MIN_API=//p' "$PROJECT_ROOT/config/app.env" | tr -d '"' | tr -d "'" | head -1)"
+SMOKE_MIN_API="${SMOKE_MIN_API:-24}"
+case "$SMOKE_MIN_API" in
+    ''|*[!0-9]*)
+        echo "[ERROR] MIN_API in config/app.env is not a decimal integer: $SMOKE_MIN_API" >&2
+        exit 1
+        ;;
+esac
+
 rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT"
 
@@ -44,10 +53,12 @@ run_flavor() {
     bash "$PROJECT_ROOT/modules/builder/03_compile_java.sh" \
         "$build_dir/obj" "$build_dir/gen" "$SRC_DIR" "$ANDROID_JAR"
     bash "$PROJECT_ROOT/modules/builder/04_dex.sh" \
-        "$build_dir/dex" "$build_dir/obj" "$R8_JAR" "$ANDROID_JAR" 24
+        "$build_dir/dex" "$build_dir/obj" "$R8_JAR" "$ANDROID_JAR" "$SMOKE_MIN_API"
+    # This is deliberately a compile/package smoke check with an empty runtime
+    # staging directory: --compile-only keeps it from claiming asset proof.
     bash "$PROJECT_ROOT/modules/builder/06_package.sh" \
         "$build_dir/unaligned.apk" "$build_dir/AndroidManifest.xml" "$RES_DIR" "$ANDROID_JAR" \
-        "$build_dir/staging/assets" "$build_dir/dex/classes.dex" "$build_dir/res"
+        "$build_dir/staging/assets" "$build_dir/dex" "$build_dir/res" --compile-only
     "$PYTHON" "$PROJECT_ROOT/modules/builder/align.py" \
         "$build_dir/unaligned.apk" "$build_dir/aligned.apk" 4
 
@@ -64,5 +75,5 @@ run_flavor release 0
 run_flavor dev 1
 
 echo
-echo "Build smoke result: PASS"
+echo "Build smoke result: PASS (compile/package only; runtime assets and signing not covered)"
 echo "Artifacts: $BUILD_ROOT/{release,dev}/aligned.apk"

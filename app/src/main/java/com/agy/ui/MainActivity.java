@@ -294,25 +294,14 @@ public class MainActivity extends Activity {
         ws.setSupportZoom(true);
         ws.setBuiltInZoomControls(true);
         ws.setDisplayZoomControls(false);
-        ws.setMediaPlaybackRequiresUserGesture(false);
-        ws.setJavaScriptCanOpenWindowsAutomatically(true);
-
-        // Stripping "; wv" and "Version/X.X" so Google accounts and Antigravity Web UI
-        // recognize it as a modern standard Chrome mobile browser:
-        String defaultUa = ws.getUserAgentString();
-        String cleanUa;
-        if (defaultUa != null && !defaultUa.isEmpty()) {
-            cleanUa = defaultUa.replace("; wv", "")
-                               .replace(";wv", "")
-                               .replaceAll("Version/\\d+(\\.\\d+)*\\s*", "");
-        } else {
-            cleanUa = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
-        }
-        ws.setUserAgentString(cleanUa);
+        ws.setMediaPlaybackRequiresUserGesture(true);
+        ws.setJavaScriptCanOpenWindowsAutomatically(false);
+        // Keep the WebView's real user agent. Spoofing a desktop/standalone
+        // browser to evade embedded-login restrictions is forbidden (B03/R05).
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            ws.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-            CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true);
+            ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+            CookieManager.getInstance().setAcceptThirdPartyCookies(wv, false);
         }
         CookieManager.getInstance().setAcceptCookie(true);
 
@@ -347,19 +336,9 @@ public class MainActivity extends Activity {
                 try {
                     CookieManager.getInstance().flush();
                 } catch (Exception ignored) {}
-
-                if (url != null) {
-                    // If user completed Google sign-in and landed on antigravity root,
-                    // automatically redirect into the active Remote Control session
-                    String activeSession = CoreRuntimeState.serverUrl;
-                    if (CoreRuntimeState.isValidSessionUrl(activeSession)
-                            && !url.contains("/r/")
-                            && (url.contains("antigravity.google") || url.contains("antigravity.google.com"))
-                            && isGoogleSessionActive()) {
-                        Log.i(TAG, "Authenticated in WebView; auto-redirecting to active session: " + activeSession);
-                        view.loadUrl(activeSession);
-                    }
-                }
+                // A cookie, URL or page finish is not proof of authentication. The
+                // session URL is published only by the owned CLI output/state path
+                // (B03/R05); no automatic redirect is inferred from cookies.
             }
 
             @Override
@@ -383,9 +362,12 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    runOnUiThread(() -> request.grant(request.getResources()));
-                }
+                // No camera/mic/other capability is needed for the coding surface.
+                // Deny by default instead of granting whatever the page asks for.
+                String origin = request.getOrigin() != null
+                        ? request.getOrigin().toString() : "<unknown>";
+                Log.i(TAG, "denying WebView permission request from " + origin);
+                runOnUiThread(request::deny);
             }
 
             @Override
@@ -422,21 +404,6 @@ public class MainActivity extends Activity {
         });
     }
 
-    private boolean isGoogleSessionActive() {
-        try {
-            CookieManager cm = CookieManager.getInstance();
-            String cookies = cm.getCookie("https://accounts.google.com");
-            if (cookies == null) {
-                cookies = cm.getCookie("https://antigravity.google.com");
-            }
-            if (cookies != null) {
-                return cookies.contains("SID=") || cookies.contains("SSID=")
-                        || cookies.contains("SAPISID=") || cookies.contains("OSID=");
-            }
-        } catch (Exception ignored) {}
-        return false;
-    }
-
     private boolean handleUrlOverride(WebView view, Uri uri) {
         if (uri == null) return false;
         String urlStr = uri.toString();
@@ -445,36 +412,30 @@ public class MainActivity extends Activity {
         if (scheme == null) return false;
         scheme = scheme.toLowerCase(java.util.Locale.US);
 
-        // 1. Intercept OAuth success callbacks delivered via deep link scheme
+        // 1. Intercept auth callbacks delivered via deep link scheme. The handler
+        // refuses unsolicited success and writes no stdin (B04a).
         if ("antigravity".equals(scheme) || "antigravity-dev".equals(scheme)) {
             Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-            oauthManager.handleDeepLink(this, intent, () -> {
-                Toast.makeText(this, "Authentication successful! Establishing Remote Control session...", Toast.LENGTH_SHORT).show();
-                if (CoreRuntimeState.isValidSessionUrl(CoreRuntimeState.serverUrl)) {
-                    loadSessionUrl(CoreRuntimeState.serverUrl);
-                }
-            });
+            oauthManager.handleDeepLink(this, intent, null);
             return true;
         }
 
         if (scheme.equals("http") || scheme.equals("https")) {
             String host = uri.getHost();
-            if (host != null) {
-                String hostLower = host.toLowerCase(java.util.Locale.US);
-                // Allow Google auth (accounts.google.com), Antigravity Studio, and related Google assets directly inside WebView
-                if (hostLower.contains("google") || hostLower.contains("gstatic")
-                        || hostLower.contains("googleapis") || hostLower.contains("googleusercontent")) {
-                    return false;
-                }
+            // Exact top-level origin policy: only the hosted Studio (exact host,
+            // HTTPS) may stay in the WebView. Everything else, including every
+            // Google auth/asset host, leaves for the system browser (B03/R05).
+            if ("https".equals(scheme) && host != null
+                    && host.equalsIgnoreCase(CoreRuntimeState.TRUSTED_SESSION_HOST)) {
+                return false;
             }
-            // For other external links, launch external browser so user keeps their Studio session active
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, uri);
                 startActivity(intent);
                 return true;
             } catch (Exception e) {
                 Log.w(TAG, "Cannot handle external URL: " + uri, e);
-                return false;
+                return true;
             }
         }
 
@@ -815,22 +776,17 @@ public class MainActivity extends Activity {
                 studioStatusDot.setTextColor(Color.parseColor("#00E676"));
             }
         } else if (CoreRuntimeState.onboardingPending) {
-            setBadge("INITIALIZING", Color.parseColor("#1976D2"));
-            infoText.setText("Completing CLI onboarding & welcome wizard...");
-            sessionUrlText.setText("Session: Initializing Remote Control session");
+            setBadge("SETUP REQUIRED", Color.parseColor("#1976D2"));
+            infoText.setText("CLI setup is waiting for your input. Terms, trust and "
+                    + "permission prompts must be answered by you.");
+            sessionUrlText.setText("Session: Setup requires interaction");
             openRemoteButton.setEnabled(true);
             openRemoteButton.setAlpha(1.0f);
-            openRemoteButton.setText("⚡  FINISH SETUP / ENTER");
-            openRemoteButton.setOnClickListener(v -> {
-                new Thread(() -> {
-                    CoreRuntimeState.submitStdin("\t");
-                    try { Thread.sleep(120); } catch (Exception ignored) {}
-                    CoreRuntimeState.submitStdin("\t");
-                    try { Thread.sleep(120); } catch (Exception ignored) {}
-                    CoreRuntimeState.submitStdin("\r\n");
-                }).start();
-                Toast.makeText(this, "Completing setup...", Toast.LENGTH_SHORT).show();
-            });
+            openRemoteButton.setText("⚙  SETUP REQUIRED");
+            openRemoteButton.setOnClickListener(v ->
+                    Toast.makeText(this,
+                            "Answer the setup prompts with CLI input; automatic keystrokes are disabled.",
+                            Toast.LENGTH_LONG).show());
             startStopButton.setEnabled(true);
             startStopButton.setText("STOP");
             if (studioStatusDot != null) {
@@ -1061,24 +1017,9 @@ public class MainActivity extends Activity {
 
     private String lastSubmittedCode = "";
 
-    private void checkClipboardForAuthCode() {
-        if (!CoreRuntimeState.authPending) {
-            return;
-        }
-        try {
-            android.content.ClipboardManager cb = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cb != null && cb.hasPrimaryClip() && cb.getPrimaryClip().getItemCount() > 0) {
-                CharSequence text = cb.getPrimaryClip().getItemAt(0).getText();
-                if (text != null) {
-                    String clip = text.toString().trim();
-                    if (clip.startsWith("4/") && clip.length() >= 20 && !clip.equals(lastSubmittedCode)) {
-                        showAuthCodeDialog(clip);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-    }
+    // Clipboard reads are user-initiated only (the "paste code" action in the
+    // auth dialog). Resuming the activity never inspects clipboard content
+    // (B04a/R06).
 
     private void showAuthCodeDialog(String prefill) {
         if (isFinishing()) return;
@@ -1129,7 +1070,6 @@ public class MainActivity extends Activity {
         if (webView != null) {
             webView.onResume();
         }
-        checkClipboardForAuthCode();
         handler.removeCallbacks(pollStatus);
         handler.post(pollStatus);
     }
