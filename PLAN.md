@@ -1,10 +1,11 @@
 # Agy-cli-app Work Board, Bug Register, and Delivery Plan
 
 - **Updated:** 2026-11-13
-- **Current integrated revision:** `33e2bd7` (single-agent fix pass, pushed to
-  `main`), with this plan refresh applied after it. The original reviewed
-  baseline was `d728f94` (`Initial version`). Always inspect current `HEAD`,
-  working-tree changes, and the latest instruction snapshot before work.
+- **Current integrated revision:** `0f9250b` (review/hardening pass, pushed to
+  `main`), with this plan refresh applied after it. The fix pass before it was
+  `33e2bd7`; the original reviewed baseline was `d728f94` (`Initial version`).
+  Always inspect current `HEAD`, working-tree changes, and the latest
+  instruction snapshot before work.
 - **Plan state:** Active; the finished product does not exist yet.
 - **Permanent product contract:** `AGENTS.md`
 - **Supported initial direction:** ARM64 Android/Bionic, min API 24, sideloaded.
@@ -187,7 +188,7 @@ bash tests/run_host_tests.sh
 ```
 
 On 2026-11-13 the offline suite was extended and is green on the integrated
-revision: `bash tests/run_host_tests.sh` ran **33 Python cases and 29 Java
+revision: `bash tests/run_host_tests.sh` ran **38 Python cases and 30 Java
 checks, all passing (exit 0)**. The former seven expected failures (A02/R16,
 A05/R19, B02/R04) are now regressions, not permanent reds:
 
@@ -311,11 +312,13 @@ required device/integration check is still missing.
 
 | ID | Status | Evidence / remaining gate |
 |---|---|---|
-| R04 | FIXED | Strict `CoreRuntimeState.isValidSessionUrl`; consumers use it; 15 Java URL checks pass. C01/F04 consumer work still open. |
-| R05 | PARTIAL | WebView keeps its real UA, uses `MIXED_CONTENT_NEVER_ALLOW`, denies every permission request, refuses third-party cookies, and only exact `https://antigravity.google.com` stays in-app; all other URLs leave for the browser. WebView device tests still pending. |
+| R01 | PARTIAL | Orphan cleanup is scoped to this flavor's exact `filesDir` via `ProcessScope` (release/dev cannot kill each other); the stale tracked helper was removed. The app-specific `usr` bootstrap/repository (D01–D04) does not exist yet. |
+| R04 | FIXED | Strict `CoreRuntimeState.isValidSessionUrl`; consumers use it; 15 Java URL checks pass. Auth URLs are exact-host HTTPS only, with no arbitrary query heuristic. C01/F04 consumer work still open. |
+| R05 | PARTIAL | WebView keeps its real UA, uses `MIXED_CONTENT_NEVER_ALLOW`, denies every permission request, refuses third-party cookies, and only exact `https://antigravity.google.com` stays in-app; `file:`/`content:`/`intent:`/`javascript:`/`data:` are blocked. Cleartext is disabled outside loopback. WebView device tests still pending. |
 | R07 | PARTIAL | Automatic login/TOS keystrokes and the Tab-Tab-Enter dashboard shortcut removed; settings/onboarding seeding deleted. No B01a/B01b device tests yet; E02 still needed for usable setup. |
 | R09 | PARTIAL | Pure `TarPolicy` verifies checksum/strict numerics/type/size/path/symlink rules; extractor enforces entry/total bounds and duplicates. Offline policy tests pass; real-archive/device extraction pending. |
 | R16 | FIXED | Config validation + manifest `<uses-sdk>` propagation + D8 min-api wiring; 7 Python config tests pass; both flavors compile in smoke. |
+| R17 | PARTIAL | Staging always compiles `agy-pty.c` into `build/native/arm64-v8a` with a required NDK clang, verifies ELF64/AArch64/linker/16 KB `p_align`, stages no fabricated seed state, and never reads or mutates the tracked binary (deleted). A real NDK/CI build remains the missing evidence. |
 | R18 | PARTIAL | Release signing fails closed without owner inputs (exit 3, signer not invoked); A04b identity/migration still BLOCKED (P3). |
 | R19 | FIXED | Aligner rebuilds headers from the central directory; data descriptors preserved; ZIP64/encryption/unknown methods rejected. |
 | R20 | PARTIAL | G02a guard: tags no longer publish, least-privilege permissions, explicit `PUBLISH` + protected environment, release job still refuses. G02b remains blocked. |
@@ -551,7 +554,7 @@ a parent or multi-task bug start with its next executable child, not a giant fix
   malformed numeric/control-character input must fail clearly; both flavors must
   compile without modifying checked-in generated files.
 
-#### A03 — Reproducible fail-closed native host build — TODO
+#### A03 — Reproducible fail-closed native host build — REVIEW (real NDK/CI build pending)
 
 - **Depends on:** A02.
 - **Starting files:** `modules/builder/05_stage_assets.py`,
@@ -1312,9 +1315,10 @@ the exact missing check, not DONE and not “nothing accomplished.”
 | A01 / 2026-11-11 baseline | Offline entry point exists; review ran 14 Python + 14 Java checks. Compile/package smoke passed both flavors. | DONE for harness only; seven known assertions fail, no device proof. |
 | G03 / 2026-11-11 | Uncommitted documentation patch on `d728f94`, only `AGENTS.md`/`PLAN.md`. Inline Python validation PASS: original product sections 2–5 preserved verbatim, all old task IDs retained, 51 unique cards, all task references resolve, R01–R32 each registered once, P1–P6 retained, balanced fences, only two Markdown paths changed. `git diff --check` PASS. Independent read-only workflow review PASS (no blocking scope/dependency/ownership contradictions). | DONE for documentation only; all production bugs remain open. No commit, release, signing, account/user-data change, or device test. |
 | Single-agent pass / 2026-11-13 (`33e2bd7`) | Committed and pushed to `main`. Build: A02, A05–A09, A04a guard. Runtime: B01a/B01b consent removal, B02 URL policy, B04a unsolicited-auth removal, C06 API-24 cleanup, C07 atomic writer, C08a–c asset publication, G02a workflow guard. Second slice in the same commit: B03 WebView exact-origin/permission policy, B05/R09 pure tar policy + extractor wiring, B07 public-broadcast removal. Checks actually run: `bash tests/run_host_tests.sh` → PASS, 33 Python + 29 Java cases; `bash tests/run_build_smoke.sh` → PASS both flavors (98 classes, D8, package, system zipalign); `bash -n` every edited shell script → clean; `08_sign.sh` release guard → exit 3 without invoking the signer. Workspace-local JDK 17 and build-tools r34 were used only for checks and removed. | DONE (offline): A02, A04a, A05, A06, A07, A08, A09, B02, G02a. REVIEW (device/real-archive/integration evidence missing): A03 (not started), B01a, B01b, B03, B04a, B05, B07, C06, C07, C08a–c. PARTIAL bugs: R05, R07, R09, R18, R20, R23, R24–R28. Not performed: device/API 24–25 tests, APK install/upgrade, real signing, vendor login, real tar extraction, WebView device matrix, lifecycle (C01/C02), or any publication. |
+| Review/hardening pass / 2026-11-13 (`0f9250b`) | Exact-host HTTPS auth policy; per-flavor `/proc` cleanup scope; URL watcher no longer retains the Process or writes stdin; non-browser WebView schemes blocked; cleartext disabled outside loopback; write failures surfaced; archive comments preserved; NDK fail-closed helper staging with ELF/16 KB checks; tracked stale helper removed; CI builds only the development edition and publication stays refused. Added `ProcessScope`, `test_stage_assets.py`, align/package/host cases. Checks: host suite PASS 38 Python + 30 Java; build smoke PASS both flavors; `bash -n` clean; workflow YAML parses. | DONE (offline): A03 staging policy, A06, B03/B05/B07 hardening. PARTIAL: R01/R05/R17/R23 pending device/NDK/CI evidence. No device run, real NDK compile, signing, network, vendor login, or publication. |
 
-The 2026-11-13 pass left the suite green: `bash tests/run_host_tests.sh` → 33
-Python + 29 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
+The 2026-11-13 passes left the suite green: `bash tests/run_host_tests.sh` → 38
+Python + 30 Java cases, exit 0. `bash tests/run_build_smoke.sh` → exit 0, both
 flavors compile/dex/package/align (still compile-only assets and the system ZIP
 aligner, not native/runtime proof). A06 was verified by direct invocation:
 `--python-only --java-only` → exit 2, unknown arg → exit 2, `--help` → exit 0,
