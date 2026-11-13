@@ -117,6 +117,15 @@ if not compile_only:
         path = os.path.join(assets_dir, required)
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
             fail("required runtime asset is missing or empty: %s" % path)
+    helper = os.path.join(assets_dir, "runtime/bin/agy-pty")
+    with open(helper, "rb") as handle:
+        # 1 MiB window: .interp/linker strings are not guaranteed in the first
+        # page for every toolchain link layout.
+        elf = handle.read(1024 * 1024)
+    if (len(elf) < 20 or elf[0:4] != b"\x7fELF" or elf[4] != 2
+            or elf[5] != 1 or elf[18] != 0xB7 or elf[19] != 0
+            or b"/system/bin/linker64" not in elf):
+        fail("runtime helper is not a verified AArch64 Android ELF: %s" % helper)
     staging_parent = os.path.dirname(assets_dir)
     for root, _dirs, files in os.walk(assets_dir):
         for name in files:

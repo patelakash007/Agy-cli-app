@@ -84,14 +84,6 @@ public final class RuntimeManager {
         CoreInstaller.installCore(this);
     }
 
-    /**
-     * Phase 2: refresh runtime/bin and cli/shims bridges.
-     */
-    public void installEnvInBackground() {
-        ShellBridgeInstaller.installFallbackBridges(getBinDir(), appContext);
-        ShellBridgeInstaller.installOpenUrlShims(getBinDir(), appContext);
-    }
-
     /** Native command to launch Google Antigravity CLI in Remote Control mode. */
     public String[] coreCommand() {
         File cliBin = CliDownloader.getCliBinary(appContext);

@@ -73,7 +73,14 @@ class PackageInputTests(unittest.TestCase):
         (self.assets / "runtime" / "bin").mkdir(parents=True, exist_ok=True)
         (self.assets / "runtime" / "certs").mkdir(parents=True, exist_ok=True)
         (self.assets / "runtime" / "runtime.marker").write_text("native-bionic\n", encoding="utf-8")
-        (self.assets / "runtime" / "bin" / "agy-pty").write_bytes(b"\x7fELF-fake-helper")
+        helper = bytearray(64)
+        helper[0:4] = b"\x7fELF"
+        helper[4] = 2
+        helper[5] = 1
+        helper[18] = 0xB7
+        helper[19] = 0
+        (self.assets / "runtime" / "bin" / "agy-pty").write_bytes(
+            bytes(helper) + b"/system/bin/linker64\x00")
         (self.assets / "runtime" / "certs" / "ca-certificates.crt").write_text(
             "-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
         (self.assets / "readme.txt").write_bytes(text_payload)

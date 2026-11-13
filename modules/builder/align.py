@@ -197,6 +197,9 @@ def align_with_python(in_apk, out_apk, alignment=4):
         cd_size = fout.tell() - cd_start
         if cd_start > _MAX_UINT32 or cd_size > _MAX_UINT32:
             raise UnsupportedArchiveError("archive requires ZIP64")
+        comment = zin.comment or b""
+        if len(comment) > 0xFFFF:
+            raise UnsupportedArchiveError("archive comment too long")
         fout.write(_EOCD.pack(
             _EOCD_SIG,
             0,
@@ -205,8 +208,9 @@ def align_with_python(in_apk, out_apk, alignment=4):
             len(central),
             cd_size,
             cd_start,
-            0,
+            len(comment),
         ))
+        fout.write(comment)
     return True
 
 

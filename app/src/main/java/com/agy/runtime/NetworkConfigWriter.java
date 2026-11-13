@@ -31,7 +31,11 @@ public final class NetworkConfigWriter {
         for (String ip : DnsCollector.collectDnsServers(appContext)) {
             resolv.append("nameserver ").append(ip).append('\n');
         }
-        AtomicFileWriter.writeText(new File(etc, "resolv.conf"), resolv.toString());
-        AtomicFileWriter.writeText(new File(etc, "hosts"), "127.0.0.1 localhost\n");
+        if (!AtomicFileWriter.writeText(new File(etc, "resolv.conf"), resolv.toString())) {
+            Log.w(TAG, "cannot publish resolv.conf; keeping the previous file");
+        }
+        if (!AtomicFileWriter.writeText(new File(etc, "hosts"), "127.0.0.1 localhost\n")) {
+            Log.w(TAG, "cannot publish hosts; keeping the previous file");
+        }
     }
 }

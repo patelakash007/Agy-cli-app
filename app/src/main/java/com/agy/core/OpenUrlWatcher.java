@@ -10,8 +10,6 @@ import com.agy.oauth.OAuthManager;
 import com.agy.ui.MainActivity;
 import com.agy.util.SensitiveDataRedactor;
 
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -48,7 +46,6 @@ public final class OpenUrlWatcher {
     private final OAuthManager oauth = new OAuthManager();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    private volatile Process supervisedProcess;
     private volatile String lastDispatchedAuthUrl = "";
     private volatile long lastDispatchedAuthTime = 0;
     private volatile String lastDispatchedSessionUrl = "";
@@ -62,8 +59,12 @@ public final class OpenUrlWatcher {
         this.appContext = context.getApplicationContext();
     }
 
+    /**
+     * Retained for the supervisor's call sites only. This watcher no longer
+     * holds the Process or writes stdin: all user input is owned elsewhere
+     * (B01a/B04a), so there is no callback/process reference to leak.
+     */
     public void setProcess(Process process) {
-        this.supervisedProcess = process;
     }
 
     /**
@@ -76,7 +77,7 @@ public final class OpenUrlWatcher {
     }
 
     public void stop() {
-        supervisedProcess = null;
+        // No owned callbacks or process references to release.
     }
 
     /**
@@ -204,26 +205,6 @@ public final class OpenUrlWatcher {
             }
         }
         return null;
-    }
-
-    private void sendRawBytes(String data, String reason) {
-        Process proc = supervisedProcess;
-        if (proc != null && data != null) {
-            try {
-                OutputStream os = proc.getOutputStream();
-                if (os != null) {
-                    os.write(data.getBytes(StandardCharsets.UTF_8));
-                    os.flush();
-                    Log.i(TAG, "Sent to CLI stdin (" + reason + ")");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed sending to CLI stdin: " + e.getMessage());
-            }
-        }
-    }
-
-    private void sendEnterToCli(String reason) {
-        sendRawBytes("\r\n", reason);
     }
 
     private void dispatchUrl(String url) {

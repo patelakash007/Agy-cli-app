@@ -439,15 +439,20 @@ public class MainActivity extends Activity {
             }
         }
 
-        // External intents (mailto, tel, market, etc.)
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-            startActivity(intent);
-            return true;
-        } catch (Exception e) {
-            Log.w(TAG, "Cannot handle intent for URI: " + uri, e);
+        // Only explicit, user-meaningful external schemes may leave the app.
+        // Everything else (file:, content:, intent:, javascript:, data:, ...)
+        // is blocked: launching an arbitrary Intent from page content is not a
+        // navigation policy (B03/R05).
+        if (scheme.equals("mailto") || scheme.equals("tel")) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            } catch (Exception e) {
+                Log.w(TAG, "Cannot handle external URI: " + uri, e);
+            }
             return true;
         }
+        Log.w(TAG, "Blocked unsupported WebView URI scheme: " + scheme);
+        return true;
     }
 
     private void buildDashboardView(boolean dark) {

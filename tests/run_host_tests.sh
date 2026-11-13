@@ -122,6 +122,7 @@ EOF
         "$JAVA_BUILD/stubs/com/agy/util/FileModeUtil.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/core/CoreRuntimeState.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/core/CoreRestartPolicy.java" \
+        "$PROJECT_ROOT/app/src/main/java/com/agy/core/ProcessScope.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/install/TarHeader.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/install/TarPolicy.java" \
         "$PROJECT_ROOT/app/src/main/java/com/agy/install/TarPath.java" \
@@ -164,5 +165,5 @@ if [ "$PY_STATUS" -eq 0 ] && [ "$JAVA_STATUS" -eq 0 ]; then
 fi
 
 echo "Host test result: FAIL (python=$PY_STATUS java=$JAVA_STATUS)"
-echo "Known regressions are expected until A02/A05/B02 are implemented; see PLAN.md."
+echo "Fix the failing cases; do not suppress them. See PLAN.md for current task status."
 exit 1

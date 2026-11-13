@@ -17,19 +17,27 @@ public final class CoreLauncher {
     private CoreLauncher() {
     }
 
-    /** Terminate any leftover orphan core processes from previous sessions to prevent EADDRINUSE on fixed ports. */
+    /**
+     * Terminate leftover core/helper processes from this app's own files
+     * directory only. There is no broad app-name or package-substring match:
+     * the release and dev flavors (and unrelated apps) must never kill each
+     * other (R01/B07 isolation; C02 owns the full owned-group contract).
+     */
     public static void killOrphanCoreProcesses() {
-        killOrphanCoreProcesses(null);
+        // No scope means no scanning: callers must provide their own filesDir.
     }
 
     public static void killOrphanCoreProcesses(File filesDir) {
+        if (filesDir == null) {
+            return;
+        }
         int myPid = android.os.Process.myPid();
         File procDir = new File("/proc");
         File[] entries = procDir.listFiles();
         if (entries == null) {
             return;
         }
-        String appScope = (filesDir != null) ? filesDir.getAbsolutePath() : "com.agy";
+        String appScope = filesDir.getAbsolutePath();
         boolean killedAny = false;
         for (File entry : entries) {
             String name = entry.getName();
@@ -52,17 +60,14 @@ public final class CoreLauncher {
                 }
                 if (n > 0) {
                     String cmdline = new String(buf, 0, n);
-                    // NEVER kill Termux processes or anything outside the app scope
-                    if (cmdline.contains("com.termux")) {
+                    // Only this app's exact private directory qualifies. This
+                    // excludes Termux, the other flavor, and sibling apps.
+                    if (!ProcessScope.isOwnedCoreProcess(cmdline, appScope)) {
                         continue;
                     }
-                    if ((cmdline.contains(appScope) || cmdline.contains("com.agy"))
-                            && (cmdline.contains("cli/agy") || cmdline.contains("bin/agy")
-                            || cmdline.contains("agy-pty") || cmdline.contains("--remote-control"))) {
-                        Log.w(TAG, "Terminating orphan core process (PID " + pid + ")");
-                        android.os.Process.sendSignal(pid, android.os.Process.SIGNAL_KILL);
-                        killedAny = true;
-                    }
+                    Log.w(TAG, "Terminating orphan core process (PID " + pid + ")");
+                    android.os.Process.sendSignal(pid, android.os.Process.SIGNAL_KILL);
+                    killedAny = true;
                 }
             } catch (Exception ignored) {
             }

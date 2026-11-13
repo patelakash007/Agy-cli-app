@@ -55,11 +55,11 @@ public final class ShellBridgeInstaller {
         }
         // Always guarantee bash and sh exist immediately
         File bash = new File(bin, "bash");
-        if (!bash.isFile()) {
+        if (!bash.isFile() || bash.length() == 0) {
             writeScript(bash, "#!/system/bin/sh\n# AGY fallback shell\nexec /system/bin/sh \"$@\"\n");
         }
         File sh = new File(bin, "sh");
-        if (!sh.isFile()) {
+        if (!sh.isFile() || sh.length() == 0) {
             writeScript(sh, "#!/system/bin/sh\n# AGY fallback shell\nexec /system/bin/sh \"$@\"\n");
         }
         // Extract native agy-pty helper if present in assets

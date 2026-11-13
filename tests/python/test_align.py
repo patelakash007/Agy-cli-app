@@ -134,6 +134,17 @@ class AlignTests(unittest.TestCase):
         self.assertIsNone(bad, "R19: aligned ZIP failed CRC validation")
         self.assertEqual(payloads, dict(entries), "R19: payload was not preserved")
 
+    def test_archive_comment_preserved(self):
+        entries = [("classes.dex", b"payload")]
+        source = self.make_zip("commented.zip", entries)
+        with zipfile.ZipFile(source, "a") as zf:
+            zf.comment = b"signed-by-test"
+        output, payloads, bad = self.align_and_read(source)
+        self.assertIsNone(bad)
+        self.assertEqual(payloads, dict(entries))
+        with zipfile.ZipFile(output) as zf:
+            self.assertEqual(zf.comment, b"signed-by-test")
+
     def test_truncated_input_is_rejected(self):
         source = self.tmp / "truncated.zip"
         source.write_bytes(b"PK\x03\x04" + b"\x00" * 10)

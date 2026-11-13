@@ -17,7 +17,7 @@ FLAVOR="${3:-release}"
 mkdir -p "$(dirname "$OUT_APK")"
 
 if [ "$FLAVOR" = "dev" ]; then
-    KEYSTORE="${AGY_DEV_KEYSTORE:-${TOOLS_DIR:-modules/../tools}/debug.keystore}"
+    KEYSTORE="${AGY_DEV_KEYSTORE:-${TOOLS_DIR:-tools}/debug.keystore}"
     KEY_ALIAS="${AGY_DEV_KEY_ALIAS:-androiddebugkey}"
     KEY_PASS="${AGY_DEV_KEY_PASS:-android}"
     STORE_PASS="${AGY_DEV_STORE_PASS:-android}"

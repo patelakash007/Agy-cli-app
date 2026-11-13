@@ -57,6 +57,23 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Configure Android NDK (fail closed)
+        run: |
+          set -euo pipefail
+          CLANG_REL="toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          if [ -z "${ANDROID_NDK_HOME:-}" ] || [ ! -x "$ANDROID_NDK_HOME/$CLANG_REL" ]; then
+            SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+            NDK_DIR="$(ls -d "$SDK_ROOT"/ndk/* 2>/dev/null | sort -V | tail -1 || true)"
+            if [ -z "$NDK_DIR" ]; then
+              yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+              "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973"
+              NDK_DIR="$SDK_ROOT/ndk/27.0.12077973"
+            fi
+            test -x "$NDK_DIR/$CLANG_REL"
+            echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
+          fi
+          echo "NDK configured: ${ANDROID_NDK_HOME:-preinstalled}"
+
       - name: Install Android Build Tools & System Utilities
         run: |
           sudo apt-get update
@@ -98,18 +115,21 @@ jobs:
             export AGY_HOME="$PWD/vendor"
           fi
 
-      - name: Build Standard Release APK (dist/antigravity.apk)
+      - name: Host regression tests
         run: |
-          bash build.sh
+          bash tests/run_host_tests.sh
 
-      - name: Build Dev Debug APK (dist/antigravity-dev.apk)
+      # The release route intentionally refuses without owner-controlled signing
+      # inputs (A04a/P3). CI builds the explicit development edition only; that is
+      # a development artifact, never a release.
+      - name: Build Development APK (dist/antigravity-dev.apk)
         run: |
           bash build.sh --dev
 
-      - name: Compute Cryptographic Checksums
+      - name: Compute Development Checksums
         run: |
           cd dist
-          sha256sum antigravity.apk antigravity-dev.apk > SHA256SUMS.txt
+          sha256sum antigravity-dev.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload Development Build Artifacts
@@ -117,7 +137,6 @@ jobs:
         with:
           name: antigravity-development-binaries
           path: |
-            dist/antigravity.apk
             dist/antigravity-dev.apk
             dist/SHA256SUMS.txt
 
@@ -157,7 +176,6 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
           make_latest: false
           files: |
-            dist/antigravity.apk
             dist/antigravity-dev.apk
             dist/SHA256SUMS.txt
           body: |

@@ -179,12 +179,15 @@ public final class CoreProcessSupervisor {
                 CoreLogWriter.closeQuietly(log);
                 log = null;
                 sleepInterruptible(delay);
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 if (stopping) {
                     break;
                 }
-                Log.e(TAG, "core start failed", e);
-                CoreRuntimeState.lastError = ErrorText.describe(e);
+                Log.e(TAG, "core start failed", t);
+                // Catch Throwable so a linkage error (for example an API-26
+                // method on API 24/25) still reaches the cleanup below.
+                CoreRuntimeState.lastError = (t instanceof Exception)
+                        ? ErrorText.describe((Exception) t) : String.valueOf(t);
                 CoreLogWriter.writeLine(log, "core start failed: " + CoreRuntimeState.lastError);
                 // install/launch failure: fail-closed, user retries from the splash.
                 break;

@@ -8,7 +8,6 @@ import java.io.File;
 public final class RuntimePaths {
 
     public static final String RUNTIME_ASSET = "runtime";
-    public static final String SEED_ASSET = RUNTIME_ASSET + "/seed";
     /** Written after runtime extraction. Skips re-extract. */
     public static final String RUNTIME_MARKER = ".installed";
 

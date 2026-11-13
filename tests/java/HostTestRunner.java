@@ -1,5 +1,6 @@
 import com.agy.core.CoreRestartPolicy;
 import com.agy.core.CoreRuntimeState;
+import com.agy.core.ProcessScope;
 import com.agy.install.TarHeader;
 import com.agy.install.TarPath;
 import com.agy.install.TarPolicy;
@@ -150,6 +151,26 @@ public final class HostTestRunner {
         test("error text falls back to class name", "A01", () -> {
             assertEquals("Exception", ErrorText.describe(new Exception()), "empty message");
             assertEquals("boom", ErrorText.describe(new Exception("boom")), "message");
+        });
+
+        // R01/R23: orphan cleanup is scoped to this flavor's exact files dir.
+        test("release scope does not own the dev flavor", "R01", () -> {
+            String releaseScope = "/data/user/0/com.agy/files";
+            assertFalse(ProcessScope.isOwnedCoreProcess(
+                            "/data/user/0/com.agy.dev/files/cli/agy --remote-control",
+                            releaseScope),
+                    "dev-flavor process matched the release scope");
+            assertFalse(ProcessScope.isOwnedCoreProcess(
+                            "com.agy helper --remote-control", releaseScope),
+                    "bare package substring matched the release scope");
+            assertTrue(ProcessScope.isOwnedCoreProcess(
+                            "/data/user/0/com.agy/files/cli/agy --remote-control",
+                            releaseScope),
+                    "own core process was not recognized");
+            assertTrue(ProcessScope.isOwnedCoreProcess(
+                            "/data/user/0/com.agy/files/runtime/bin/agy-pty",
+                            releaseScope),
+                    "own helper process was not recognized");
         });
 
         // C07/R25: concurrent writers must publish one complete payload and
